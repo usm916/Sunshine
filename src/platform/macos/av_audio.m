@@ -55,10 +55,14 @@
 
 - (void)dealloc {
   // make sure we don't process any further samples
+  [self.audioCaptureSession stopRunning];
+  [self.audioCaptureSession release];
+  self.audioCaptureSession = nil;
   self.audioConnection = nil;
   // make sure nothing gets stuck on this signal
   [self.samplesArrivedSignal signal];
   [self.samplesArrivedSignal release];
+  self.samplesArrivedSignal = nil;
   TPCircularBufferCleanup(&audioSampleBuffer);
   [super dealloc];
 }
