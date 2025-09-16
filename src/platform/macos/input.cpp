@@ -262,6 +262,7 @@ const KeyCodeMap kKeyCodesMap[] = {
         key == kVK_Command || key == kVK_RightCommand ||
         key == kVK_Option || key == kVK_RightOption ||
         key == kVK_Control || key == kVK_RightControl) {
+      CGEventSetIntegerValueField(event, kCGKeyboardEventKeycode, key);
       CGEventFlags mask;
 
       switch (key) {
@@ -284,7 +285,7 @@ const KeyCodeMap kKeyCodesMap[] = {
       }
 
       macos_input->kb_flags = release ? macos_input->kb_flags & ~mask : macos_input->kb_flags | mask;
-      CGEventSetType(event, kCGEventFlagsChanged);
+      CGEventSetType(event, release ? kCGEventKeyUp : kCGEventKeyDown);
       CGEventSetFlags(event, macos_input->kb_flags);
     } else {
       CGEventSetIntegerValueField(event, kCGKeyboardEventKeycode, key);
