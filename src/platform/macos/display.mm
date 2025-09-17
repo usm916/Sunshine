@@ -70,6 +70,7 @@ namespace platf {
 
       // FIXME: We should time out if an image isn't returned for a while
       dispatch_semaphore_wait(signal, DISPATCH_TIME_FOREVER);
+      dispatch_release(signal);
 
       return capture_e::ok;
     }
@@ -131,6 +132,7 @@ namespace platf {
       }];
 
       dispatch_semaphore_wait(signal, DISPATCH_TIME_FOREVER);
+      dispatch_release(signal);
 
       return 0;
     }
