@@ -63,6 +63,7 @@
 
   if ([self.session canAddInput:screenInput]) {
     [self.session addInput:screenInput];
+    [screenInput release];
   } else {
     [screenInput release];
     return nil;
