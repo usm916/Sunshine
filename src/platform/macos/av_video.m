@@ -107,6 +107,7 @@
       [self.session addOutput:videoOutput];
     } else {
       [videoOutput release];
+      dispatch_release(recordingQueue);
       return nil;
     }
 
@@ -114,6 +115,8 @@
     dispatch_semaphore_t signal = dispatch_semaphore_create(0);
 
     [self.videoOutputs setObject:videoOutput forKey:videoConnection];
+    dispatch_release(recordingQueue);
+    [videoOutput release];
     [self.captureCallbacks setObject:frameCallback forKey:videoConnection];
     [self.captureSignals setObject:signal forKey:videoConnection];
 
