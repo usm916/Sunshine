@@ -74,10 +74,35 @@
 }
 
 - (void)dealloc {
-  [self.videoOutputs release];
-  [self.captureCallbacks release];
-  [self.captureSignals release];
   [self.session stopRunning];
+
+  NSArray *outputs = [[self.session outputs] copy];
+  for (AVCaptureOutput *output in outputs) {
+    if ([output isKindOfClass:[AVCaptureVideoDataOutput class]]) {
+      [(AVCaptureVideoDataOutput *) output setSampleBufferDelegate:nil queue:NULL];
+    }
+    [self.session removeOutput:output];
+  }
+  [outputs release];
+
+  NSArray *inputs = [[self.session inputs] copy];
+  for (AVCaptureInput *input in inputs) {
+    [self.session removeInput:input];
+  }
+  [inputs release];
+
+  [self.videoOutputs release];
+  self.videoOutputs = nil;
+
+  [self.captureCallbacks release];
+  self.captureCallbacks = nil;
+
+  [self.captureSignals release];
+  self.captureSignals = nil;
+
+  [self.session release];
+  self.session = nil;
+
   [super dealloc];
 }
 
