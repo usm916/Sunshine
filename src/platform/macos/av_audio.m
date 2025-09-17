@@ -75,7 +75,7 @@
   if ([self.audioCaptureSession canAddInput:audioInput]) {
     [self.audioCaptureSession addInput:audioInput];
   } else {
-    [audioInput dealloc];
+    [audioInput release];
     return -1;
   }
 
@@ -94,6 +94,7 @@
   dispatch_queue_t recordingQueue = dispatch_queue_create("audioSamplingQueue", qos);
 
   [audioOutput setSampleBufferDelegate:self queue:recordingQueue];
+  dispatch_release(recordingQueue);
 
   if ([self.audioCaptureSession canAddOutput:audioOutput]) {
     [self.audioCaptureSession addOutput:audioOutput];
@@ -106,8 +107,6 @@
   self.audioConnection = [audioOutput connectionWithMediaType:AVMediaTypeAudio];
 
   [self.audioCaptureSession startRunning];
-
-  [audioInput release];
   [audioOutput release];
 
   self.samplesArrivedSignal = [[NSCondition alloc] init];
