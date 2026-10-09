@@ -10,7 +10,8 @@ Windowsホストを中心に、接続中の配信範囲変更、クリップボ�
 - `upstream`: 本流のリモート。
 - `master`: 本流追跡用。独自の変更を加えない。
 - `custom/main`: 独自機能の統合ブランチ。
-- GitHub上の独自forkと`origin`はまだ設定されていない。
+- `origin`: [usm916/Sunshine](https://github.com/usm916/Sunshine)。独自変更の保存先。
+- フォークの旧`master`と過去の`codex/*`ブランチは保持し、今回の管理起点は`custom/main`とする。
 - 今回は開発方針と管理基盤を追加した段階。独自機能は未実装。
 - サブモジュールは未初期化。標準パス`C:\msys64`にはMSYS2が見つからず、ネイティブビルドは未実行。
 
@@ -30,7 +31,15 @@ git merge --no-ff feature/runtime-crop
 
 クリップボードは`feature/clipboard-text`、低帯域設定は`feature/low-bandwidth`のように分けます。機能の仕様、設定名、対応クライアント、テスト状況を設計文書へ追記します。公開済みの統合ブランチはrebaseせず、履歴を保持します。
 
-独自のGitHubリポジトリを用意したら、その実際のURLを使って`origin`を追加し、`custom/main`をpushします。本流へのpushは通常の運用に含めません。
+独自変更は`origin`へ保存します。初回は`git push -u origin custom/main`、以後は`custom/main`から`git push`を実行します。本流へのpushは通常の運用に含めません。GitHubの既定ブランチは旧`master`のままなので、新しい作業は`custom/main`を明示して開始します。
+
+## 既存フォークの引き継ぎ
+
+2026-10-10時点の旧`origin/master`は`107f6afa5cfc63c9032d54a720dff2b50c28ce0c`（2025-09-16更新）。取得した本流に対して832コミット遅れ、独自履歴は2コミットありました。過去の`codex/*`ブランチは8本です。
+
+旧`master`の独自修正`593b5210`はmacOSの修飾キーイベント処理を変更しています。現在の本流では対象のCoreGraphics入力処理がlibvirtualhidへ置き換わっており、旧実装への差分をそのまま適用できません。このため旧`master`の履歴をmergeで継承し、競合した`src/platform/macos/input.cpp`には現在の本流の実装を採用します。macOSでの挙動が同等かどうかは実機では未検証です。
+
+旧`master`と既存の作業ブランチを上書き・削除せず、新しい`custom/main`へ履歴と設計文書をまとめます。旧作業ブランチにある未統合の修正は今回の統合対象に含めず、必要になった時点で現在の本流と比較して評価します。
 
 ## 本流更新の取り込み
 
