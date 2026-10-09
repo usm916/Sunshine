@@ -36,6 +36,8 @@ Windowsホストを中心に、接続中の配信範囲変更、クリップボ�
 & .\scripts\check-custom-pair.ps1
 # 別の場所にクライアントを置いた場合
 & .\scripts\check-custom-pair.ps1 -ClientRoot 'D:\path\to\moonlightCustom'
+# ローカルの一時リポジトリで正常系・不一致の検出をテスト
+& .\tests\custom\test-pair-check.ps1
 ```
 
 検査はsubmoduleの取得元・固定コミット・チェックアウトと、記録したソースの基準を確認します。`foundation`段階ではネイティブのソース・ビルド設定が本流の基準から変わっていないことも検査します。通信機能を実装した段階では`phase`を更新し、機能用のテストを追加します。この検査だけでは実際の配信・コピー動作や各OSでの互換性を保証しません。

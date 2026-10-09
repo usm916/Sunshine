@@ -70,6 +70,7 @@ $hostRecord = Get-Content -LiteralPath (Join-Path $HostRoot 'docs/custom/compati
 $clientRecord = Get-Content -LiteralPath (Join-Path $ClientRoot 'docs/custom/compatibility.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 Assert-PairEqual ([string]$hostRecord.schema_version) '1' 'Host record version'
 Assert-PairEqual ([string]$clientRecord.schema_version) '1' 'Client record version'
+Assert-PairEqual (Invoke-PairGit $HostRoot @('remote', 'get-url', 'origin')) $clientRecord.host_repository 'Host repository'
 Assert-PairEqual (Invoke-PairGit $ClientRoot @('rev-parse', 'HEAD')) $hostRecord.client_commit 'Recorded client revision'
 Assert-PairEqual (Invoke-PairGit $ClientRoot @('remote', 'get-url', 'origin')) $hostRecord.client_repository 'Client repository'
 Assert-PairEqual $clientRecord.common_repository $hostRecord.common_repository 'Shared repository'
@@ -79,7 +80,7 @@ Assert-PairSubmodule $HostRoot 'third-party/moonlight-common-c' $hostRecord.comm
 Assert-PairSubmodule $ClientRoot 'moonlight-common-c/moonlight-common-c' $hostRecord.common_commit $hostRecord.common_repository
 
 if ($hostRecord.phase -eq 'foundation') {
-    Assert-PairBaseline $HostRoot $hostRecord.host_upstream_base @('src', 'src_assets', 'tests', 'cmake', 'CMakeLists.txt')
+    Assert-PairBaseline $HostRoot $hostRecord.host_upstream_base @('src', 'src_assets', 'tests', ':(exclude)tests/custom/**', 'cmake', 'CMakeLists.txt')
     Assert-PairBaseline $ClientRoot $clientRecord.client_upstream_base @('app', 'moonlight-common-c/moonlight-common-c.pro', 'globaldefs.pri', 'moonlight-qt.pro', 'config.tests')
     Assert-PairBaseline (Join-Path $HostRoot 'third-party/moonlight-common-c') $hostRecord.common_code_base @('src', 'cmake', 'CMakeLists.txt')
 }
