@@ -577,6 +577,25 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+### clipboard_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Experimental plain-text clipboard sharing on Windows with a compatible custom Moonlight client.
+            Restart Sunshine after changing this setting. Both sides must explicitly enable sharing.
+            The first subscribing stream owns sharing; additional streams cannot read or overwrite it.
+            Host-to-client sharing sends the current host text when the stream subscribes.
+            Only authenticated encrypted control messages are accepted. Text is limited to 32,755 UTF-8 bytes;
+            oversized, invalid, empty, and non-text values are ignored without truncating or clearing the other clipboard.
+        </td>
+    </tr>
+    <tr><td>Default</td><td colspan="2">@code{} disabled @endcode</td></tr>
+    <tr><td>Values</td><td colspan="2">disabled, host_to_client, client_to_host, bidirectional</td></tr>
+    <tr><td>Example</td><td colspan="2">@code{} clipboard_mode = bidirectional @endcode</td></tr>
+</table>
+
 ### key_repeat_delay
 
 <table>

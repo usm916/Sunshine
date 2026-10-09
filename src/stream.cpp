@@ -4,6 +4,8 @@
  */
 
 // standard includes
+#include "src/platform/clipboard_policy.h"
+
 #include <cstring>
 #include <fstream>
 #include <future>
@@ -570,7 +572,7 @@ namespace stream {
    * returns string_view pointing to payload data
    */
   static inline std::string_view encode_control(session_t *session, const std::string_view &plaintext, std::uint8_t *tagged_cipher, std::size_t tagged_size) {
-    if (tagged_size < sizeof(control_encrypted_t) + sizeof(crypto::cipher::tag_size)) {
+    if (tagged_size < sizeof(control_encrypted_t) + crypto::cipher::tag_size + plaintext.size() || plaintext.size() > 65535 - sizeof(std::uint32_t) - crypto::cipher::tag_size) {
       return {};
     }
 
@@ -1139,7 +1141,7 @@ namespace stream {
    * @return 0 when the control message is queued.
    */
   int send_clipboard_text(session_t *session, const platf::clipboard_text_t &msg) {
-    if (!session->control.peer || msg.text.size() > SS_CLIPBOARD_TEXT_MAX) {
+    if (!session->control.peer || session->config.controlProtocolType != 13 || !(platf::clipboard_permissions() & SS_CLIPBOARD_HOST_TO_CLIENT) || msg.text.empty() || !SsClipboardTextValid(msg.text.data(), msg.text.size())) {
       return -1;
     }
 
@@ -1283,6 +1285,10 @@ namespace stream {
         std::copy(payload.end() - 16, payload.end(), std::begin(iv));
       }
 
+      // Clipboard input is accepted only through the authenticated GCM control path.
+      if (plaintext.size() >= sizeof(NV_INPUT_HEADER) && reinterpret_cast<const NV_INPUT_HEADER *>(plaintext.data())->magic == util::endian::little(SS_CLIPBOARD_TEXT_MAGIC)) {
+        return;
+      }
       input::passthrough(session->input, std::move(plaintext));
     });
 
@@ -1334,6 +1340,16 @@ namespace stream {
         return;
       }
 
+      if (plaintext.size() < sizeof(control_header_v2)) {
+        session::stop(*session);
+        return;
+      }
+      std::uint16_t declared_length;
+      std::memcpy(&declared_length, plaintext.data() + sizeof(std::uint16_t), sizeof(declared_length));
+      if (util::endian::little(declared_length) != plaintext.size() - sizeof(control_header_v2)) {
+        session::stop(*session);
+        return;
+      }
       auto type = *(std::uint16_t *) plaintext.data();
       std::string_view next_payload {(char *) plaintext.data() + 4, plaintext.size() - 4};
 

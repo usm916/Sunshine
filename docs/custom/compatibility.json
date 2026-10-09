@@ -1,13 +1,29 @@
 {
   "schema_version": 1,
-  "phase": "foundation",
+  "phase": "implementation",
   "host_upstream_base": "bd0cdfd2eb7d638dfa6014ba4e90bfc88fc52371",
   "client_repository": "https://github.com/usm916/moonlight-qt.git",
-  "client_commit": "9d0ae6dabc1ed4e4942ef7c5459e06807e8a5e46",
+  "client_commit": "ce35564ef2a35cba36bd39a96ebd2b61dc003a66",
   "common_repository": "https://github.com/usm916/moonlight-common-c.git",
-  "common_commit": "354af50957626e00b36202e78fd4d8ec13cca541",
+  "common_commit": "ae67fe009386d536569fecc34ba156d581309b54",
   "common_code_base": "f900dd4767759c7b9d0e93bcea666b55c69ea62f",
-  "clipboard_status": "draft_not_implemented",
-  "native_build_status": "not_run",
-  "end_to_end_status": "not_run"
+  "clipboard_status": "experimental_implemented",
+  "native_build_status": "passed_windows_x64_release",
+  "end_to_end_status": "not_run",
+  "clipboard_tests": [
+    "host_gtest_57_passed",
+    "windows_api_passed",
+    "protocol_gcc_passed",
+    "web_configuration_14_passed",
+    "client_protocol_msvc_passed",
+    "client_lifecycle_passed",
+    "portable_help_passed"
+  ],
+  "host_toolchain": {
+    "cmake": "4.4.4",
+    "qt": "6.12.0 static",
+    "node": "24.19.0",
+    "compiler": "GCC 16.2.0 UCRT64",
+    "ffmpeg_tag": "v2026.1004.34232"
+  }
 }

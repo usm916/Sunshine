@@ -310,6 +310,7 @@ namespace config {
 
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
     bool native_pen_touch;  ///< Enable native pen and touch injection.
+    std::string clipboard_mode;  ///< Text sharing: disabled, host_to_client, client_to_host, or bidirectional.
   };
 
   namespace flag {

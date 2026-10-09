@@ -95,6 +95,18 @@ try {
     $passed++
     Invoke-FixtureGit @('-C', $fixtureHostCommon, 'restore', '--', 'src/Input.h')
 
+    # Exercise the foundation guard against this fixture's own baseline even after implementation starts.
+    $fixtureHostRecordPath = Join-Path $fixtureHost 'docs/custom/compatibility.json'
+    $fixtureClientRecordPath = Join-Path $fixtureClient 'docs/custom/compatibility.json'
+    $fixtureHostRecord = Get-Content -LiteralPath $fixtureHostRecordPath -Raw | ConvertFrom-Json
+    $fixtureClientRecord = Get-Content -LiteralPath $fixtureClientRecordPath -Raw | ConvertFrom-Json
+    $fixtureHostRecord.phase = 'foundation'
+    $fixtureHostRecord.host_upstream_base = (& git -C $fixtureHost rev-parse HEAD).Trim()
+    $fixtureClientRecord.client_upstream_base = (& git -C $fixtureClient rev-parse HEAD).Trim()
+    $fixtureHostRecord.common_code_base = $record.common_commit
+    $fixtureClientRecord.common_code_base = $record.common_commit
+    $fixtureHostRecord | ConvertTo-Json | Set-Content -LiteralPath $fixtureHostRecordPath
+    $fixtureClientRecord | ConvertTo-Json | Set-Content -LiteralPath $fixtureClientRecordPath
     Add-Content -LiteralPath (Join-Path $fixtureClient 'app/streaming/session.cpp') -Value '// Fixture-only source change'
     Assert-CheckerRejects 'Git check failed' 'unexpected foundation source change'
     $passed++

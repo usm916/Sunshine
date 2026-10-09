@@ -226,7 +226,18 @@ watch(
               default="true"
     ></Checkbox>
 
-    <!-- Key Repeat Delay-->
+    <!-- Text Clipboard Sharing -->
+    <div class="mb-3" v-if="platform === 'windows'">
+      <label for="clipboard_mode" class="form-label">{{ $t('config.clipboard_mode') }}</label>
+      <select id="clipboard_mode" class="form-select" v-model="config.clipboard_mode">
+        <option value="disabled">{{ $t('config.clipboard_disabled') }}</option>
+        <option value="bidirectional">{{ $t('config.clipboard_bidirectional') }}</option>
+        <option value="host_to_client">{{ $t('config.clipboard_host_to_client') }}</option>
+        <option value="client_to_host">{{ $t('config.clipboard_client_to_host') }}</option>
+      </select>
+      <div class="form-text">{{ $t('config.clipboard_mode_desc') }}</div>
+    </div>
+
     <div class="mb-3" v-if="config.keyboard === 'enabled' && platform === 'windows'">
       <label for="key_repeat_delay" class="form-label">{{ $t('config.key_repeat_delay') }}</label>
       <input type="text" class="form-control" id="key_repeat_delay" placeholder="500"

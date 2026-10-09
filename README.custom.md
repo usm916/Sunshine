@@ -12,9 +12,9 @@ Windowsホストを中心に、接続中の配信範囲変更、クリップボ�
 - `custom/main`: 独自機能の統合ブランチ。
 - `origin`: [usm916/Sunshine](https://github.com/usm916/Sunshine)。独自変更の保存先。
 - フォークの旧`master`と過去の`codex/*`ブランチは保持し、今回の管理起点は`custom/main`とする。
-- 今回は開発方針と管理基盤を追加した段階。独自機能は未実装。
-- 共通通信ライブラリとPythonツール用のサブモジュールを初期化済み。他のサブモジュールはビルド前に初期化する。
-- 標準パス`C:\msys64`にはMSYS2が見つからず、ネイティブビルドは未実行。
+- `feature/clipboard-text`にWindowsのテキスト同期を実装。実験機能として両側で既定OFF。
+- ビルドに必要なサブモジュールを再帰的に初期化済み。共通通信ライブラリはクライアントと同じコミットへ固定。
+- `C:\msys64`へMSYS2 UCRT64を整備済み。Windows x64のReleaseビルド、57件のgtest、Windows API連携、共通Cテスト、Web UIの14テストと配布版の起動確認が成功。別端末間の配信テストは未実施。
 
 [機能設計・実装順序](docs/custom/design.md)に対象範囲と検証項目を記録しています。本流のREADME、AGENTS.md、ライセンスは引き続き適用します。
 
@@ -28,7 +28,7 @@ Windowsホストを中心に、接続中の配信範囲変更、クリップボ�
 | Qtクライアント | [usm916/moonlight-qt](https://github.com/usm916/moonlight-qt/tree/custom/main) | `D:\data\code\moonlightCustom` |
 | 共通通信ライブラリ | [usm916/moonlight-common-c](https://github.com/usm916/moonlight-common-c/tree/custom/main) | `D:\data\code\moonlightCommonCustom` |
 
-通信仕様の基準は共通ライブラリ内の[clipboard-v1.md](third-party/moonlight-common-c/docs/custom/clipboard-v1.md)です。これは未実装の仕様案です。ホストのOS操作・サーバー側の送受信はSunshine、クライアントの設定UI・OS操作はMoonlight Qtで実装します。
+通信仕様の基準は共通ライブラリ内の[clipboard-v1.md](third-party/moonlight-common-c/docs/custom/clipboard-v1.md)です。これは実装した実験拡張の通信仕様です。ホストのOS操作・サーバー側の送受信はSunshine、クライアントの設定UI・OS操作はMoonlight Qtで実装します。
 
 [compatibility.json](docs/custom/compatibility.json)は検査対象のクライアントと共通ライブラリの固定コミットを記録します。両側を更新した際は、この記録も更新します。
 
@@ -104,3 +104,33 @@ uv sync --locked
 ```
 
 ネイティブコード変更後は`uv run --locked lb-update-clang-format`を実行し、無関係な差分がないか確認します。新規・変更メソッドには本流の規約に沿ってDoxygenとテストを追加します。
+
+## テキスト同期を使う
+
+Web UIのInputにある`Text Clipboard Sharing`で許可方向を選び、Sunshineを再起動します。Moonlight Custom側でも`Sync text clipboard`を有効にします。既定では両側OFFです。
+
+- `Both directions`: 双方向。
+- `Host to client`: ホストの内容をクライアントへ送る。
+- `Client to host`: クライアントの内容をホストへ送る。
+- `Disabled`: 無効。
+
+テキストはUTF-8で32,755バイトまでです。上限超過は切り詰めず拒否し、空・画像・ファイルは同期しません。ホスト→クライアントを許可した場合、接続時のホストのテキストも送ります。最初の1セッションだけが共有でき、切断時に購読と保留を破棄します。
+
+[別端末間の検証手順](docs/custom/clipboard-validation.md)を用意しています。接続中の配信範囲変更と低帯域対応は後続の実装です。
+
+## 再現用のスクリプト
+
+MSYS2をインストール後、UCRT64ターミナルで`pacman -Syu`を実行します。コア更新でターミナル再起動を求められたら閉じて開き直し、更新がなくなるまで繰り返します。
+
+```powershell
+& 'C:\msys64\msys2_shell.cmd' -defterm -here -no-start -ucrt64 -c 'bash scripts/custom/provision-msys.sh'
+& 'C:\msys64\msys2_shell.cmd' -defterm -here -no-start -ucrt64 -c 'bash scripts/custom/build-sunshine.sh'
+```
+
+ビルドスクリプトはRelease本体、対象gtest、共通Cテストを実行し、`cmake-build-custom/package`へ配布用ファイルを配置します。システムのサービスとしては登録しません。GUIトレイ用のQtも静的リンクします。
+
+Moonlight用Qt MSVC SDKは`uv run --no-project --with py7zr python scripts/custom/install-qt.py`で公式配布元から取得できます。アーカイブのハッシュを公式HTTPSメタデータと照合して展開します。クライアントのビルドはMoonlight側の`scripts/build-custom.ps1`を使用します。
+
+配布フォルダの`sunshine.exe`を起動するときは、同じポートを使用する既存のSunshineサービスを先に停止します。この端末では`SunshineService`が動いているため、新版の実機確認時に切り替えが必要です。ビルドスクリプトは稼働中のサービスを変更しません。
+
+現在の本流はWindowsの仮想入力にVirtual HID Broker（最小版`2026.914.1218.10`）を使用します。キーボード・マウス・仮想ゲームパッドの実機検証には本流のインストール手順に従って必要なBrokerを用意してください。クリップボードのWindows APIテストはBrokerを使わずに実行できます。

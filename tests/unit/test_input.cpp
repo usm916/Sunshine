@@ -175,12 +175,27 @@ TEST(InputPacketValidationTest, AcceptsEmptyAndMaximumClipboardPackets) {
   EXPECT_TRUE(input::testing::is_valid_input_packet(empty_packet));
 
   constexpr auto maximum_declared_size = static_cast<std::uint32_t>(prefix + SS_CLIPBOARD_TEXT_MAX);
-  const auto maximum_packet = make_input_packet(
+  auto maximum_packet = make_input_packet(
     SS_CLIPBOARD_TEXT_MAGIC,
     maximum_declared_size,
     sizeof(std::uint32_t) + maximum_declared_size
   );
+  std::fill(maximum_packet.begin() + sizeof(NV_INPUT_HEADER) + sizeof(std::uint32_t), maximum_packet.end(), 'a');
   EXPECT_TRUE(input::testing::is_valid_input_packet(maximum_packet));
+}
+
+TEST(InputPacketValidationTest, RejectsInvalidClipboardText) {
+  auto packet = make_input_packet(SS_CLIPBOARD_TEXT_MAGIC, 11, 15);
+  packet[12] = 'a';
+  packet[13] = 'b';
+  packet[14] = 'c';
+  EXPECT_TRUE(input::testing::is_valid_input_packet(packet));
+  packet[13] = 0;
+  EXPECT_FALSE(input::testing::is_valid_input_packet(packet));
+  packet[12] = 0xed;
+  packet[13] = 0xa0;
+  packet[14] = 0x80;
+  EXPECT_FALSE(input::testing::is_valid_input_packet(packet));
 }
 
 TEST(InputPacketValidationTest, RejectsTruncatedAndOversizedClipboardPackets) {

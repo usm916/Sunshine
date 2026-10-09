@@ -15,11 +15,16 @@
 // local includes
 #include <src/config.h>
 #include <src/file_handler.h>
+#include <src/utility.h>
 
 using namespace std::literals;
 
 TEST(ConfigDefaultsTest, UsesAutomaticGamepadSelection) {
   EXPECT_EQ(config::input.gamepad, "auto");
+}
+
+TEST(ConfigDefaultsTest, ClipboardSharingIsDisabled) {
+  EXPECT_EQ(config::input.clipboard_mode, "disabled");
 }
 
 TEST(ConfigDefaultsTest, TreatsFp16SdrCapturesAsLinear) {
@@ -164,4 +169,21 @@ TEST_F(ConfigPersistenceTest, ParsesFp16SdrGammaEncodedOption) {
 
   config::apply_config_for_test("fp16_sdr_gamma_encoded = disabled\n");
   EXPECT_FALSE(config::video.fp16_sdr_gamma_encoded);
+}
+
+TEST_F(ConfigPersistenceTest, ClipboardDirectionsRejectUnknownModes) {
+  const auto original_mode = config::input.clipboard_mode;
+  auto restore = util::fail_guard([&] {
+    config::input.clipboard_mode = original_mode;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_config_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  constexpr std::array modes {"disabled"sv, "host_to_client"sv, "client_to_host"sv, "bidirectional"sv};
+  for (const auto mode : modes) {
+    config::apply_config_for_test(std::string {"clipboard_mode = "} + std::string {mode} + "\n");
+    EXPECT_EQ(config::input.clipboard_mode, mode);
+  }
+  config::apply_config_for_test("clipboard_mode = unknown\n");
+  EXPECT_EQ(config::input.clipboard_mode, "bidirectional");
 }

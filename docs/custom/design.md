@@ -1,6 +1,6 @@
 # 独自機能の設計
 
-確認日: 2026-10-10。以下は実装案であり、動作確認済み機能の一覧ではありません。
+確認日: 2026-10-10。テキストクリップボードは実験実装を追加済みです。配信範囲変更と低帯域対応は以下の設計案で、まだ実装していません。
 
 ## 要件と初期方針
 
@@ -8,7 +8,7 @@
 
 初期案は、既存Moonlightで受信できる動的矩形切り出しと、対応クライアント向けのテキスト双方向同期です。クリップボードの初期対応クライアントはMoonlight QtのWindows/Linux/macOS版を候補とします。Android/iOSの同期は別実装・別検証になります。
 
-2026-10-10に[usm916/moonlight-qt](https://github.com/usm916/moonlight-qt/tree/custom/main)を別リポジトリ・別フォルダとして準備し、[usm916/moonlight-common-c](https://github.com/usm916/moonlight-common-c/tree/custom/main)を共有通信ライブラリの保存先として作成しました。ホストとクライアントは同じ固定コミットをsubmoduleで参照します。通信仕様の案と責務は共通ライブラリ内の[clipboard-v1.md](../../third-party/moonlight-common-c/docs/custom/clipboard-v1.md)へ集約します。依存構成の確認は`scripts/check-custom-pair.ps1`で行います。同期機能自体はまだ実装されていません。
+2026-10-10に[usm916/moonlight-qt](https://github.com/usm916/moonlight-qt/tree/custom/main)を別リポジトリ・別フォルダとして準備し、[usm916/moonlight-common-c](https://github.com/usm916/moonlight-common-c/tree/custom/main)を共有通信ライブラリの保存先として作成しました。ホストとクライアントは同じ固定コミットをsubmoduleで参照します。通信仕様と責務は共通ライブラリ内の[clipboard-v1.md](../../third-party/moonlight-common-c/docs/custom/clipboard-v1.md)へ集約します。依存構成の確認は`scripts/check-custom-pair.ps1`で行います。テキスト同期は`feature/clipboard-text`に実装しています。WindowsのホストとQtクライアントを初期対象とし、別端末間の配信を通した往復は未検証です。
 
 | 機能 | 実装規模の見積もり | クライアント側の作業 | 自動化・検証の境界 |
 | --- | --- | --- | --- |
@@ -47,23 +47,13 @@
 
 ## クリップボード
 
-取得したSunshine本流では、ストリーミング用クリップボード実装は見つかっていません。Web UIのログコピー機能とは別に実装が必要です。
+[共通仕様 v1](../../third-party/moonlight-common-c/docs/custom/clipboard-v1.md)に従って実験実装を追加しました。参考PRを履歴付きで取り込み、WindowsのUnicode処理、対応能力の確認、既定OFF、方向制御、厳密なUTF-8と長さの検証、単一セッションの購読、終了時の破棄を追加しています。
 
-再利用を検討する未マージの提案:
+ホストは`clipboard_mode`、クライアントは`Sync text clipboard`で有効化します。32,755バイトまでのテキストが対象で、空の内容は同期しません。ホスト→クライアントが許可されると購読時の現在のホスト内容も送ります。通信は認証済みの暗号化制御経路を使用します。
 
-- [moonlight-common-c #155](https://github.com/moonlight-stream/moonlight-common-c/pull/155): テキスト送信とホストからの通知。
-- [moonlight-qt #2019](https://github.com/moonlight-stream/moonlight-qt/pull/2019): 既定OFFの同期設定。Windows/macOSの実機検証はPR説明では未実施。
-- [Sunshine #5782](https://github.com/LizardByte/Sunshine/pull/5782): Linux X11向けのDraft。Windowsのクリップボード処理は未実装で、レビュー上の指摘もあるため、そのまま製品実装として取り込まない。
+Windowsのクリップボード占有時は250ms間隔で最大2秒再試行し、成功した内容だけを反射抑制状態へ記録します。ホストとクライアントの保留内容は最新1件へまとめます。切断で購読、通知、再試行を破棄します。ユーザーのクリップボードを変更しない私用Window StationでのWindows APIテストを用意しています。
 
-既存Qtクライアントの[キーボード処理](https://github.com/moonlight-stream/moonlight-qt/blob/master/app/streaming/input/keyboard.cpp)には`Ctrl+Alt+Shift+V`によるテキスト入力があります。これは双方向のクリップボード同期とは異なります。
-
-第一案は上記提案のプロトコルを確認し、共通処理を評価した上でWindowsのUnicodeクリップボードを実装することです。提案にある32,755バイト上限とメッセージ番号は、固定コミットのコードをレビューしてから採否を決めます。未マージの提案なので今後の仕様変更も想定します。
-
-同期は利用者が有効化した接続に限り、方向別に制御します。UTF-8/UTF-16変換、空文字列の扱い、重複通知・反射ループ防止、クリップボードが他プロセスに占有された場合の再試行、終了時の購読解除を実装します。認証・暗号化された経路を使い、内容はログに記録しません。
-
-WindowsサービスのSession 0からではなく、利用者のデスクトップで動くSunshineプロセスからクリップボードへアクセスする構成を確認します。初期は複数クライアントへの無条件共有を行わず、対象セッションを明確にします。
-
-画像は後続候補です。フォーマット変換と転送上限、分割・キャンセル、映像を圧迫しない転送制御を設計してから追加します。Android/iOSはQt版とは別の対応と実機検証が必要です。
+画像は後続候補です。フォーマット変換と転送上限、分割・キャンセル、映像を圧迫しない転送制御を設計してから追加します。Android/iOSはQt版とは別の実装です。他OSのOS連携と別端末間の配信を通したコピーは実機検証が必要です。
 
 ## 低帯域への対応
 
@@ -77,12 +67,12 @@ WindowsサービスのSession 0からではなく、利用者のデスクトッ�
 
 ## 実装順序と検証
 
-1. MSYS2 UCRT64の依存環境を準備し、未変更の本流をビルドして基準にする。
-2. 範囲管理と入力変換の単体テストを作り、GPU経路へ接続する。
-3. Web UIによる接続中変更を追加し、標準Moonlightで切り出しを検証する。
-4. 低帯域設定と測定で、切り出しによる画質と通信量の効果を確認する。
-5. 既存クリップボード提案をレビューし、WindowsホストとQtクライアントのテキスト同期を実装する。
-6. Windows/Linux/macOSの実機で接続・コピー・再接続を確認し、画像やモバイル対応を再評価する。
+1. Windowsのホスト・Qtクライアント・共通通信ライブラリのビルド環境とテキスト同期を整備する（今回の作業）。
+2. 別端末間の配信でコピー往復、同期OFF、片方向、切断・再接続、未対応相手を確認する。
+3. 範囲管理と入力変換の単体テストを作り、GPU経路へ接続する。
+4. Web UIによる接続中変更を追加し、標準Moonlightで切り出しを検証する。
+5. 低帯域設定と測定で、切り出しによる画質と通信量の効果を確認する。
+6. Windows/Linux/macOSの実機検証を広げ、画像やモバイル対応を再評価する。
 
 GPUを使わない範囲検証・座標変換・パケット解析・状態遷移は自動テストに寄せます。GPUごとの映像、他OSのクリップボード、利用回線の体感品質は対応機器での検証が必要です。
 

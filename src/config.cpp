@@ -867,6 +867,7 @@ namespace config {
     true,  // always send scancodes
     true,  // high resolution scrolling
     true,  // native pen/touch support
+    "disabled",  // Text clipboard sharing requires explicit opt-in.
   };
 
   /**
@@ -1865,6 +1866,7 @@ namespace config {
 
     bool_f(vars, "high_resolution_scrolling", input.high_resolution_scrolling);
     bool_f(vars, "native_pen_touch", input.native_pen_touch);
+    string_restricted_f(vars, "clipboard_mode", input.clipboard_mode, {"disabled"sv, "host_to_client"sv, "client_to_host"sv, "bidirectional"sv});
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "system_tray", sunshine.system_tray);

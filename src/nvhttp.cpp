@@ -31,6 +31,7 @@
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
+#include "platform/clipboard_policy.h"
 #include "platform/common.h"
 #include "process.h"
 #include "rtsp.h"
@@ -1263,6 +1264,8 @@ namespace nvhttp {
 
     const uint32_t codec_mode_flags = get_codec_mode_flags();
     tree.put("root.ServerCodecModeSupport", codec_mode_flags);
+    tree.put("root.CustomClipboardVersion", platf::clipboard_permissions() ? SS_CLIPBOARD_VERSION : 0);
+    tree.put("root.CustomClipboardDirections", platf::clipboard_permissions());
 
     if (!config::nvhttp.external_ip.empty()) {
       tree.put("root.ExternalIP", config::nvhttp.external_ip);

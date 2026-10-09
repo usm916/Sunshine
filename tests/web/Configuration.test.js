@@ -115,6 +115,25 @@ describe('network configuration', () => {
   })
 })
 
+describe('clipboard input configuration', () => {
+  it('defaults to disabled and saves permitted directions on Windows', async () => {
+    const config = { clipboard_mode: 'disabled', controller: 'disabled', keyboard: 'disabled', mouse: 'disabled', keybindings: '' }
+    const wrapper = mount(Inputs, { props: { platform: 'windows', config }, global: globalOptions })
+    expect(wrapper.get('#clipboard_mode').element.value).toBe('disabled')
+    expect(wrapper.get('label[for="clipboard_mode"]').text()).toBe('config.clipboard_mode')
+    await wrapper.get('#clipboard_mode').setValue('host_to_client')
+    expect(config.clipboard_mode).toBe('host_to_client')
+    await wrapper.get('#clipboard_mode').setValue('bidirectional')
+    expect(config.clipboard_mode).toBe('bidirectional')
+  })
+
+  it.each(['linux', 'macos'])('hides Windows clipboard sharing on %s', platform => {
+    const config = { clipboard_mode: 'disabled', controller: 'disabled', keyboard: 'disabled', mouse: 'disabled', keybindings: '' }
+    const wrapper = mount(Inputs, { props: { platform, config }, global: globalOptions })
+    expect(wrapper.find('#clipboard_mode').exists()).toBe(false)
+  })
+})
+
 describe('gamepad input configuration', () => {
   function mountInputs(platform, gamepadDriver = '', gamepad = 'auto', controller = 'enabled') {
     return mount(Inputs, {

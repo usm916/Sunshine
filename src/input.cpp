@@ -2,6 +2,9 @@
  * @file src/input.cpp
  * @brief Definitions for gamepad, keyboard, and mouse input handling.
  */
+#include "src/platform/clipboard_binding.h"
+#include "src/platform/clipboard_policy.h"
+
 #include <cstddef>
 #include <cstdint>
 extern "C" {
@@ -309,7 +312,7 @@ namespace input {
         client_context {platf::allocate_client_input_context(platf_input)},
         touch_port_event {std::move(touch_port_event)},
         feedback_queue {std::move(feedback_queue)},
-        clipboard_queue {std::move(clipboard_queue)},
+        clipboard_binding {std::move(clipboard_queue)},
         mouse_left_button_timeout {},
         touch_port {{0, 0, 0, 0, 0, 0}, 0, 0, 0.0f, 0.0f, 1.0f, 1.0f, 0, 0},
         accumulated_vscroll_delta {},
@@ -328,7 +331,7 @@ namespace input {
 
     safe::mail_raw_t::event_t<input::touch_port_t> touch_port_event;  ///< Touch port event.
     platf::feedback_queue_t feedback_queue;  ///< Queue used to deliver controller feedback to the platform backend.
-    platf::clipboard_queue_t clipboard_queue;  ///< Queue used to deliver host clipboard text to the client.
+    platf::clipboard_binding_t clipboard_binding;  ///< Clipboard operations serialized with stream disconnect.
 
     std::list<std::vector<uint8_t>> input_queue;  ///< Validated input packets waiting for processing.
     std::mutex input_queue_lock;  ///< Input queue lock.
@@ -439,7 +442,6 @@ namespace input {
   void rebind_input(const std::shared_ptr<input_t> &input, const safe::mail_t &mail) {
     input->touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
     input->feedback_queue = mail->queue<platf::gamepad_feedback_msg_t>(mail::gamepad_feedback);
-    input->clipboard_queue = mail->queue<platf::clipboard_text_t>(mail::clipboard);
 
     for (int client_index = 0; client_index < input->gamepads.size(); ++client_index) {
       auto &gamepad = input->gamepads[client_index];
@@ -1340,6 +1342,9 @@ namespace input {
    * @param header Packet header at the start of the raw input bytes.
    */
   void passthrough_clipboard(const std::shared_ptr<input_t> &input, const NV_INPUT_HEADER *header) {
+    if (platf::clipboard_permissions() == 0) {
+      return;
+    }
     auto declared = util::endian::big(header->size);
     constexpr auto prefix = sizeof(std::uint32_t) + sizeof(std::uint32_t);
     if (declared < prefix) {
@@ -1347,15 +1352,16 @@ namespace input {
     }
 
     auto text_len = declared - prefix;
-    platf::clipboard_subscribe(input->clipboard_queue);
-    if (text_len == 0) {
+    const auto *raw_text = reinterpret_cast<const char *>(header) + sizeof(NV_INPUT_HEADER) + sizeof(std::uint32_t);
+    if (!SsClipboardTextValid(raw_text, text_len)) {
       return;
     }
-
-    const auto *text = reinterpret_cast<const std::byte *>(header) + sizeof(NV_INPUT_HEADER) + sizeof(std::uint32_t);
-    std::string copy(text_len, '\0');
-    std::memcpy(copy.data(), static_cast<const void *>(text), text_len);
-    platf::clipboard_set(copy, input->clipboard_queue);
+    input->clipboard_binding.apply([&](const platf::clipboard_queue_t &queue) {
+      platf::clipboard_subscribe(queue);
+      if (text_len && (platf::clipboard_permissions() & SS_CLIPBOARD_CLIENT_TO_HOST)) {
+        platf::clipboard_set(std::string_view(raw_text, text_len), queue);
+      }
+    });
   }
 
   /**
@@ -1809,7 +1815,7 @@ namespace input {
       case SS_CLIPBOARD_TEXT_MAGIC:
         {
           constexpr auto prefix = sizeof(std::uint32_t) + sizeof(std::uint32_t);
-          return declared_size >= prefix && declared_size - prefix <= SS_CLIPBOARD_TEXT_MAX;
+          return declared_size >= prefix && declared_size == packet.size() - sizeof(header.size) && SsClipboardTextValid(reinterpret_cast<const char *>(packet.data()) + sizeof(NV_INPUT_HEADER) + sizeof(std::uint32_t), declared_size - prefix);
         }
       case MULTI_CONTROLLER_MAGIC_GEN5:
         return validate_fixed_input_packet<NV_MULTI_CONTROLLER_PACKET>(packet, declared_size);
@@ -2286,6 +2292,13 @@ namespace input {
       return;
     }
 
+    // Clipboard work stages a bounded value on its own worker. Handle it here so
+    // old input batches cannot re-subscribe after disconnect or mailbox rebinding.
+    if (util::endian::little(header.magic) == SS_CLIPBOARD_TEXT_MAGIC) {
+      passthrough_clipboard(input, reinterpret_cast<const NV_INPUT_HEADER *>(input_data.data()));
+      return;
+    }
+
     bool schedule_task = false;
     {
       std::lock_guard lock {input->input_queue_lock};
@@ -2366,7 +2379,7 @@ namespace input {
    * @brief Reset the object to its initial empty state.
    */
   void reset(std::shared_ptr<input_t> &input) {
-    platf::clipboard_unsubscribe(input->clipboard_queue);
+    input->clipboard_binding.stop(platf::clipboard_unsubscribe);
     task_pool.cancel(key_press_repeat_id);
     task_pool.cancel(input->mouse_left_button_timeout);
 
@@ -2485,6 +2498,7 @@ namespace input {
     }
 
     if (resumed) {
+      input->clipboard_binding.rebind(mail->queue<platf::clipboard_text_t>(mail::clipboard), platf::clipboard_unsubscribe);
       dispatch_input_task([input, mail = std::move(mail)]() {
         rebind_input(input, mail);
       });
