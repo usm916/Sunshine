@@ -13,9 +13,32 @@ Windowsホストを中心に、接続中の配信範囲変更、クリップボ�
 - `origin`: [usm916/Sunshine](https://github.com/usm916/Sunshine)。独自変更の保存先。
 - フォークの旧`master`と過去の`codex/*`ブランチは保持し、今回の管理起点は`custom/main`とする。
 - 今回は開発方針と管理基盤を追加した段階。独自機能は未実装。
-- サブモジュールは未初期化。標準パス`C:\msys64`にはMSYS2が見つからず、ネイティブビルドは未実行。
+- 共通通信ライブラリとPythonツール用のサブモジュールを初期化済み。他のサブモジュールはビルド前に初期化する。
+- 標準パス`C:\msys64`にはMSYS2が見つからず、ネイティブビルドは未実行。
 
 [機能設計・実装順序](docs/custom/design.md)に対象範囲と検証項目を記録しています。本流のREADME、AGENTS.md、ライセンスは引き続き適用します。
+
+## ホスト・クライアント・共通ライブラリ
+
+ホストとクライアントを別リポジトリに分け、共通通信ライブラリを同じ固定コミットで参照します。
+
+| 役割 | リポジトリ | ローカルフォルダ |
+| --- | --- | --- |
+| Windowsホスト | [usm916/Sunshine](https://github.com/usm916/Sunshine/tree/custom/main) | `D:\data\code\sunshineCustom` |
+| Qtクライアント | [usm916/moonlight-qt](https://github.com/usm916/moonlight-qt/tree/custom/main) | `D:\data\code\moonlightCustom` |
+| 共通通信ライブラリ | [usm916/moonlight-common-c](https://github.com/usm916/moonlight-common-c/tree/custom/main) | `D:\data\code\moonlightCommonCustom` |
+
+通信仕様の基準は共通ライブラリ内の[clipboard-v1.md](third-party/moonlight-common-c/docs/custom/clipboard-v1.md)です。これは未実装の仕様案です。ホストのOS操作・サーバー側の送受信はSunshine、クライアントの設定UI・OS操作はMoonlight Qtで実装します。
+
+[compatibility.json](docs/custom/compatibility.json)は検査対象のクライアントと共通ライブラリの固定コミットを記録します。両側を更新した際は、この記録も更新します。
+
+```powershell
+& .\scripts\check-custom-pair.ps1
+# 別の場所にクライアントを置いた場合
+& .\scripts\check-custom-pair.ps1 -ClientRoot 'D:\path\to\moonlightCustom'
+```
+
+検査はsubmoduleの取得元・固定コミット・チェックアウトと、記録したソースの基準を確認します。`foundation`段階ではネイティブのソース・ビルド設定が本流の基準から変わっていないことも検査します。通信機能を実装した段階では`phase`を更新し、機能用のテストを追加します。この検査だけでは実際の配信・コピー動作や各OSでの互換性を保証しません。
 
 ## 独自変更の管理
 

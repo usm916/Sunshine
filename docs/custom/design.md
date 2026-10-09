@@ -8,6 +8,8 @@
 
 初期案は、既存Moonlightで受信できる動的矩形切り出しと、対応クライアント向けのテキスト双方向同期です。クリップボードの初期対応クライアントはMoonlight QtのWindows/Linux/macOS版を候補とします。Android/iOSの同期は別実装・別検証になります。
 
+2026-10-10に[usm916/moonlight-qt](https://github.com/usm916/moonlight-qt/tree/custom/main)を別リポジトリ・別フォルダとして準備し、[usm916/moonlight-common-c](https://github.com/usm916/moonlight-common-c/tree/custom/main)を共有通信ライブラリの保存先として作成しました。ホストとクライアントは同じ固定コミットをsubmoduleで参照します。通信仕様の案と責務は共通ライブラリ内の[clipboard-v1.md](../../third-party/moonlight-common-c/docs/custom/clipboard-v1.md)へ集約します。依存構成の確認は`scripts/check-custom-pair.ps1`で行います。同期機能自体はまだ実装されていません。
+
 | 機能 | 実装規模の見積もり | クライアント側の作業 | 自動化・検証の境界 |
 | --- | --- | --- | --- |
 | クライアントのテキストをホストへ入力 | 小 | Moonlight Qtに既存の貼り付けショートカットあり | 既存機能を確認。ホストのクリップボード自体を同期する機能とは異なる |

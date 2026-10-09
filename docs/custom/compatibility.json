@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "foundation",
+  "host_upstream_base": "bd0cdfd2eb7d638dfa6014ba4e90bfc88fc52371",
+  "client_repository": "https://github.com/usm916/moonlight-qt.git",
+  "client_commit": "9d0ae6dabc1ed4e4942ef7c5459e06807e8a5e46",
+  "common_repository": "https://github.com/usm916/moonlight-common-c.git",
+  "common_commit": "354af50957626e00b36202e78fd4d8ec13cca541",
+  "common_code_base": "f900dd4767759c7b9d0e93bcea666b55c69ea62f",
+  "clipboard_status": "draft_not_implemented",
+  "native_build_status": "not_run",
+  "end_to_end_status": "not_run"
+}
