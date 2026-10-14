@@ -23,7 +23,40 @@ namespace video::cursor_focus {
     int width = 512;  ///< Width of the unchanged rectangle, in output pixels.
     int height = 320;  ///< Height of the unchanged rectangle, in output pixels.
     int background_loop_ms = 0;  ///< Full background refresh target; zero is live, minus one freezes it.
+    bool automatic = false;  ///< Select a background preset from the client's requested bitrate.
+    int background_loop_frames = 0;  ///< Session-only sweep length in converted frames; zero uses milliseconds.
   };
+
+  /**
+   * @brief Select immutable session settings without modifying the saved configuration.
+   *
+   * @param configured User's focus geometry and manual settings.
+   * @param requested_kbps Client bitrate before audio and FEC reservations; nonpositive values retain manual settings.
+   * @return Session settings; automatic mode disables focus at 3000 kbps or more.
+   */
+  inline settings_t select_settings(settings_t configured, std::int64_t requested_kbps) {
+    if (!configured.enabled || !configured.automatic || requested_kbps <= 0) {
+      return configured;
+    }
+    configured.background_loop_frames = 0;
+    if (requested_kbps >= 3000) {
+      configured.enabled = false;
+    } else if (requested_kbps >= 2000) {
+      configured.background_scale = 2;
+      configured.background_loop_ms = 0;
+      configured.background_loop_frames = 5;
+    } else if (requested_kbps >= 1000) {
+      configured.background_scale = 4;
+      configured.background_loop_ms = 1000;
+    } else if (requested_kbps > 250) {
+      configured.background_scale = 12;
+      configured.background_loop_ms = 3000;
+    } else {
+      configured.background_scale = 16;
+      configured.background_loop_ms = 5000;
+    }
+    return configured;
+  }
 
   /**
    * @brief Desktop coordinates and the visible, unletterboxed output dimensions.

@@ -30,9 +30,10 @@ namespace platf::dxgi {
      * @param constants Validated focus geometry.
      * @param loop_ms Full refresh target, or minus one to freeze the background.
      * @param now_ns Monotonic conversion time in nanoseconds.
+     * @param loop_frames Session-only sweep length in converted frames; zero uses milliseconds.
      * @return S_OK, or the D3D11 resource creation error.
      */
-    HRESULT update(ID3D11Device *device, ID3D11DeviceContext *context, ID3D11Texture2D *input, const ::video::cursor_focus::shader_constants_t &constants, int loop_ms, std::int64_t now_ns) {
+    HRESULT update(ID3D11Device *device, ID3D11DeviceContext *context, ID3D11Texture2D *input, const ::video::cursor_focus::shader_constants_t &constants, int loop_ms, std::int64_t now_ns, int loop_frames = 0) {
       D3D11_TEXTURE2D_DESC desc {};
       input->GetDesc(&desc);
       if (!texture_ || desc.Width != width_ || desc.Height != height_ || desc.Format != format_) {
@@ -61,7 +62,7 @@ namespace platf::dxgi {
       }
       ID3D11ShaderResourceView *unbound = nullptr;
       context->PSSetShaderResources(1, 1, &unbound);
-      const auto work = scheduler_.advance(width_, height_, loop_ms, now_ns);
+      const auto work = scheduler_.advance(width_, height_, loop_ms, now_ns, loop_frames);
       if (work.full) {
         context->CopyResource(texture_.get(), input);
       } else {

@@ -515,7 +515,7 @@ namespace platf::dxgi {
             viewport.Height,
             display->display_rotation == DXGI_MODE_ROTATION_UNSPECIFIED ? 0 : display->display_rotation - 1
           };
-          focus_constants = ::video::cursor_focus::make_constants(config::video.cursor_focus, geometry, cursor.x, cursor.y, cursor_known);
+          focus_constants = ::video::cursor_focus::make_constants(focus_settings, geometry, cursor.x, cursor.y, cursor_known);
         }
         auto &img_ctx = img_ctx_map[img.id];
 
@@ -532,9 +532,9 @@ namespace platf::dxgi {
         }
 
         if (cursor_focus_buffer) {
-          if (focus_constants.enabled && !img.dummy && config::video.cursor_focus.background_loop_ms != 0) {
+          if (focus_constants.enabled && !img.dummy && (focus_settings.background_loop_ms != 0 || focus_settings.background_loop_frames > 0)) {
             const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-            status = cursor_focus_background.update(device.get(), device_ctx.get(), img_ctx.encoder_texture.get(), focus_constants, config::video.cursor_focus.background_loop_ms, now_ns);
+            status = cursor_focus_background.update(device.get(), device_ctx.get(), img_ctx.encoder_texture.get(), focus_constants, focus_settings.background_loop_ms, now_ns, focus_settings.background_loop_frames);
             if (FAILED(status)) {
               img_ctx.encoder_mutex->ReleaseSync(0);
               BOOST_LOG(error) << "Failed to update cursor focus background: " << util::log_hex(status);
@@ -966,11 +966,6 @@ namespace platf::dxgi {
           BOOST_LOG(error) << "Failed to create cursor focus constant buffer: " << util::log_hex(status);
           return -1;
         }
-        BOOST_LOG(info) << "Cursor focus enabled: radius=" << config::video.cursor_focus.radius
-                        << " output pixels, shape=" << config::video.cursor_focus.shape
-                        << ", rectangle=" << config::video.cursor_focus.width << "x" << config::video.cursor_focus.height
-                        << ", background scale=" << config::video.cursor_focus.background_scale
-                        << ", background loop=" << config::video.cursor_focus.background_loop_ms << "ms";
       }
       device_ctx->PSSetConstantBuffers(2, 1, &cursor_focus_buffer);
 
@@ -1122,6 +1117,7 @@ namespace platf::dxgi {
 
     buf_t subsample_offset;  ///< Subsample offset.
     buf_t color_matrix;  ///< Color matrix.
+    ::video::cursor_focus::settings_t focus_settings = config::video.cursor_focus;  ///< Immutable session focus settings.
     buf_t cursor_focus_buffer;  ///< Mutable cursor-area parameters; null preserves the original sampling path.
     cursor_focus_background_t cursor_focus_background;  ///< Per-session retained background and refresh timing.
 
@@ -1188,6 +1184,14 @@ namespace platf::dxgi {
      */
     int convert(platf::img_t &img_base) override {
       return base.convert(img_base);
+    }
+
+    /**
+     * @brief Apply cursor-focus settings only to this encoder's conversion resources.
+     * @param settings Focus geometry and background preset selected for this connection.
+     */
+    void set_cursor_focus(const ::video::cursor_focus::settings_t &settings) override {
+      base.focus_settings = settings;
     }
 
     /**
@@ -1355,6 +1359,14 @@ namespace platf::dxgi {
      */
     int convert(platf::img_t &img_base) override {
       return base.convert(img_base);
+    }
+
+    /**
+     * @brief Apply cursor-focus settings only to this encoder's conversion resources.
+     * @param settings Focus geometry and background preset selected for this connection.
+     */
+    void set_cursor_focus(const ::video::cursor_focus::settings_t &settings) override {
+      base.focus_settings = settings;
     }
 
   private:

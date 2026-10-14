@@ -1739,6 +1739,7 @@ namespace config {
     int_f(vars, "max_bitrate", video.max_bitrate);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});
     bool_f(vars, "cursor_focus", video.cursor_focus.enabled);
+    bool_f(vars, "cursor_focus_auto", video.cursor_focus.automatic);
     int_between_f(vars, "cursor_focus_radius", video.cursor_focus.radius, {32, 1024});
     int_between_f(vars, "cursor_focus_background_scale", video.cursor_focus.background_scale, {2, 16});
     string_restricted_f(vars, "cursor_focus_shape", video.cursor_focus.shape, {"circle"sv, "rectangle"sv});

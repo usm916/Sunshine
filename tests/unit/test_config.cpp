@@ -190,6 +190,8 @@ TEST_F(ConfigPersistenceTest, ClipboardDirectionsRejectUnknownModes) {
 
 TEST(ConfigDefaultsTest, CursorFocusIsDisabled) {
   EXPECT_FALSE(config::video.cursor_focus.enabled);
+  EXPECT_FALSE(config::video.cursor_focus.automatic);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_frames, 0);
   EXPECT_EQ(config::video.cursor_focus.radius, 160);
   EXPECT_EQ(config::video.cursor_focus.background_scale, 4);
   EXPECT_EQ(config::video.cursor_focus.shape, "circle");
@@ -259,4 +261,18 @@ TEST_F(ConfigPersistenceTest, CursorRectangleAndBackgroundLoopValidateConfigurat
   EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 60000);
   config::apply_config_for_test("cursor_focus_background_loop_ms = 0\n");
   EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 0);
+}
+
+TEST_F(ConfigPersistenceTest, CursorFocusAutomaticModeParses) {
+  const auto original = config::video.cursor_focus;
+  auto restore = util::fail_guard([&] {
+    config::video.cursor_focus = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_config_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  config::apply_config_for_test("cursor_focus_auto = enabled\n");
+  EXPECT_TRUE(config::video.cursor_focus.automatic);
+  config::apply_config_for_test("cursor_focus_auto = disabled\n");
+  EXPECT_FALSE(config::video.cursor_focus.automatic);
 }

@@ -1568,7 +1568,7 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
 <table>
     <tr>
         <td>Description</td>
-        <td colspan="2">Preserve detail around the physical host cursor and simplify the background before video encoding, without changing the stream dimensions, scale, or input coordinates. This option is only supported on Windows D3D11 hardware conversion (NVENC and D3D11-backed AMF/Quick Sync). Unknown cursor positions or a cursor outside the streamed monitor keep the frame unchanged. Software encoding is not supported. Restart Sunshine after changes. Reducing detail does not impose a network bandwidth limit; lower the client bitrate separately.</td>
+        <td colspan="2">Preserve detail around the physical host cursor and simplify the background before video encoding, without changing the stream dimensions, scale, or input coordinates. This option is only supported on Windows D3D11 hardware conversion (NVENC and D3D11-backed AMF/Quick Sync). Unknown cursor positions or a cursor outside the streamed monitor keep the frame unchanged. Software encoding is not supported. Focus sessions disable audio capture and transmission; normal sessions follow stream_audio. Restart Sunshine after saved configuration changes. Reducing detail does not impose a network bandwidth limit; lower the client bitrate separately.</td>
     </tr>
     <tr>
         <td>Default</td>
@@ -1580,6 +1580,27 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
         <td>Example</td>
         <td colspan="2">@code{}
             cursor_focus = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### cursor_focus_auto
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Select the background preset per connection from the requested client bitrate before audio and FEC adjustment. Requires cursor_focus. Up to 250 kbps: cell size 16, sweep 5 seconds; 251–999: size 12, 3 seconds; 1000–1999: size 4, 1 second; 2000–2999: size 2, 5 converted frames; 3000 or above: normal image. The configured shape and sharp dimensions are preserved. Focus sessions disable audio capture and transmission and do not reserve audio bandwidth. Normal sessions follow stream_audio. Selection does not write configuration or restart Sunshine. A legacy client without a configured bitrate uses its maximum video bitrate. Nonpositive bitrates preserve manual settings. Windows only. Saved configuration changes still require one restart.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_auto = enabled
             @endcode</td>
     </tr>
 </table>

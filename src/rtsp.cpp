@@ -1250,6 +1250,16 @@ namespace rtsp_stream {
       config.audio.flags[audio::config_t::CONTINUOUS_AUDIO] = true;
     }
 
+#ifdef _WIN32
+    config.monitor.cursor_focus = video::cursor_focus::select_settings(config::video.cursor_focus, configuredBitrateKbps > 0 ? configuredBitrateKbps : config.monitor.bitrate);
+#endif
+    config.audio.enabled = config::audio.stream && !config.monitor.cursor_focus.enabled;
+    BOOST_LOG(info) << "Session cursor focus: " << (config.monitor.cursor_focus.enabled ? "enabled" : "disabled")
+                    << ", background scale=" << config.monitor.cursor_focus.background_scale
+                    << ", loop=" << config.monitor.cursor_focus.background_loop_ms << "ms/"
+                    << config.monitor.cursor_focus.background_loop_frames << " frames, audio="
+                    << (config.audio.enabled ? "enabled" : "disabled");
+
     // If the client sent a configured bitrate, we will choose the actual bitrate ourselves
     // by using FEC percentage and audio quality settings. If the calculated bitrate ends up
     // too low, we'll allow it to exceed the limits rather than reducing the encoding bitrate
@@ -1265,7 +1275,7 @@ namespace rtsp_stream {
 
       // Adjust the bitrate to account for audio traffic bandwidth usage (capped at 20% reduction).
       // The bitrate per channel is 256 Kbps for high quality mode and 96 Kbps for normal quality.
-      auto audioBitrateAdjustment = (config.audio.flags[audio::config_t::HIGH_QUALITY] ? 256 : 96) * config.audio.channels;
+      auto audioBitrateAdjustment = audio::bandwidth_reservation_kbps(config.audio);
       configuredBitrateKbps -= std::min((std::int64_t) audioBitrateAdjustment, configuredBitrateKbps / 5);
 
       // Reduce it by another 500Kbps to account for A/V packet overhead and control data

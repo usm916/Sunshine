@@ -256,3 +256,76 @@ TEST(CursorFocusBackgroundTest, BoundsRejectInvalidOutputMappingAndClipExtremeCe
   extreme.center = {std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
   EXPECT_EQ(focus_bounds(extreme, 120, 100), (pixel_rect_t {120, 0, 120, 0}));
 }
+
+TEST(CursorFocusAutomaticTest, SelectsEveryBitrateBoundaryAndPreservesGeometryAndSavedSettings) {
+  settings_t saved {true, 96, 8, "rectangle", 640, 240, -1, true};
+  for (const auto &[bitrate, scale, ms, frames, enabled] : std::vector<std::tuple<int, int, int, int, bool>> {
+         {1, 16, 5000, 0, true},
+         {250, 16, 5000, 0, true},
+         {251, 12, 3000, 0, true},
+         {500, 12, 3000, 0, true},
+         {999, 12, 3000, 0, true},
+         {1000, 4, 1000, 0, true},
+         {1999, 4, 1000, 0, true},
+         {2000, 2, 0, 5, true},
+         {2999, 2, 0, 5, true},
+         {3000, 8, -1, 0, false},
+         {std::numeric_limits<int>::max(), 8, -1, 0, false}
+       }) {
+    const auto session = select_settings(saved, bitrate);
+    EXPECT_EQ(session.background_scale, scale);
+    EXPECT_EQ(session.background_loop_ms, ms);
+    EXPECT_EQ(session.background_loop_frames, frames);
+    EXPECT_EQ(session.enabled, enabled);
+    EXPECT_EQ(session.shape, saved.shape);
+    EXPECT_EQ(session.radius, saved.radius);
+    EXPECT_EQ(session.width, saved.width);
+    EXPECT_EQ(session.height, saved.height);
+    EXPECT_TRUE(saved.enabled);
+    EXPECT_EQ(saved.background_scale, 8);
+    EXPECT_EQ(saved.background_loop_ms, -1);
+  }
+}
+
+TEST(CursorFocusAutomaticTest, DisabledManualAndUnknownBitratesRetainManualSettings) {
+  settings_t saved {true, 96, 8, "rectangle", 640, 240, -1, true};
+  for (const auto bitrate : {0, -1}) {
+    EXPECT_EQ(select_settings(saved, bitrate).background_loop_ms, -1);
+  }
+  saved.automatic = false;
+  EXPECT_EQ(select_settings(saved, 250).background_scale, 8);
+  saved.automatic = true;
+  saved.enabled = false;
+  EXPECT_FALSE(select_settings(saved, 250).enabled);
+  EXPECT_EQ(select_settings(saved, 250).background_scale, 8);
+}
+
+TEST(CursorFocusBackgroundTest, FiveFrameSweepIsExactIndependentOfFpsAndClock) {
+  for (const auto frame_ns : {0LL, 33333333LL, 100000000LL}) {
+    background_scheduler_t scheduler;
+    ASSERT_TRUE(scheduler.advance(120, 100, 0, 0, 5).full);
+    for (int frame = 1; frame <= 5; ++frame) {
+      const auto work = scheduler.advance(120, 100, 0, frame * frame_ns, 5);
+      ASSERT_EQ(work.count, 6);
+      EXPECT_FALSE(work.full);
+      EXPECT_EQ(work.regions[0].top, (frame - 1) * 20);
+      EXPECT_EQ(work.regions[5].right, 120);
+    }
+    EXPECT_EQ(scheduler.advance(120, 100, 0, 6 * frame_ns, 5).regions[0], (pixel_rect_t {0, 0, 20, 20}));
+    EXPECT_TRUE(scheduler.advance(120, 100, 0, 0, 10).full);
+    EXPECT_EQ(scheduler.advance(120, 100, 0, 0, 10).count, 3);
+    EXPECT_TRUE(scheduler.advance(120, 100, -1, 0, 0).full);
+    EXPECT_EQ(scheduler.advance(120, 100, -1, 1, 0).count, 0);
+  }
+}
+
+TEST(CursorFocusBackgroundTest, FrameSweepFractionalWorkAndBoundedCatchup) {
+  background_scheduler_t scheduler;
+  scheduler.advance(1, 1, 0, 0, 5);
+  for (int frame = 1; frame < 5; ++frame) {
+    EXPECT_EQ(scheduler.advance(1, 1, 0, frame, 5).count, 0);
+  }
+  EXPECT_EQ(scheduler.advance(1, 1, 0, 5, 5).count, 1);
+  scheduler.advance(120, 100, 0, 0, 1);
+  EXPECT_EQ(scheduler.advance(120, 100, 0, 1, 1).count, 8);
+}

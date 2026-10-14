@@ -2483,7 +2483,7 @@ namespace video {
             BOOST_LOG(error) << "Could not convert image"sv;
             return;
           }
-          if (config::video.cursor_focus.enabled) {
+          if (config.cursor_focus.enabled) {
             cursor_focus_image = std::move(img);
           }
         } else if (!images->running()) {
@@ -2630,6 +2630,7 @@ namespace video {
     }
 
     if (result) {
+      result->set_cursor_focus(config.cursor_focus);
       result->colorspace = colorspace;
     }
 
@@ -2793,7 +2794,7 @@ namespace video {
             ctx->idr_events->pop();
           }
 
-          if (img && (frame_captured || config::video.cursor_focus.enabled) && pos->session->convert(*img)) {
+          if (img && (frame_captured || ctx->config.cursor_focus.enabled) && pos->session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
             ctx->shutdown_event->raise(true);
 

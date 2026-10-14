@@ -71,7 +71,17 @@ namespace audio {
     stream_params_t customStreamParams;  ///< Custom Opus layout used when CUSTOM_SURROUND_PARAMS is enabled.
 
     std::bitset<MAX_FLAGS> flags;  ///< Enabled audio feature flags.
+    bool enabled = true;  ///< Whether this session may capture, encode and send audio.
   };
+
+  /**
+   * @brief Reserve the legacy audio bandwidth allowance only for audio-enabled sessions.
+   * @param config Session audio settings, including the trimming policy.
+   * @return Bandwidth allowance in kilobits per second.
+   */
+  inline int bandwidth_reservation_kbps(const config_t &config) {
+    return config.enabled ? (config.flags[config_t::HIGH_QUALITY] ? 256 : 96) * config.channels : 0;
+  }
 
   /**
    * @brief Shared audio device state used while streams are active.

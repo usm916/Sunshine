@@ -597,6 +597,13 @@ namespace platf {
      */
     virtual int convert(platf::img_t &img) = 0;
 
+    /**
+     * @brief Set immutable cursor-focus settings before the first frame conversion.
+     * @param settings Focus geometry and background preset selected for this session.
+     */
+    virtual void set_cursor_focus(const video::cursor_focus::settings_t &settings) {
+    }
+
     video::sunshine_colorspace_t colorspace;  ///< Colorspace metadata expected by the encoder.
   };
 

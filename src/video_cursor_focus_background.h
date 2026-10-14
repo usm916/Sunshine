@@ -75,39 +75,46 @@ namespace video::cursor_focus {
      * @param height Capture texture height.
      * @param loop_ms Target time for a complete sweep; zero is continuous, minus one freezes.
      * @param now_ns Monotonic time in nanoseconds.
+     * @param loop_frames Session-only sweep length in converted frames, taking precedence over milliseconds.
      * @return Full initialization or ordered, nonoverlapping tile updates.
      */
-    background_update_t advance(int width, int height, int loop_ms, std::int64_t now_ns) {
+    background_update_t advance(int width, int height, int loop_ms, std::int64_t now_ns, int loop_frames = 0) {
       background_update_t result;
       if (width <= 0 || height <= 0) {
         reset();
         return result;
       }
       loop_ms = std::clamp(loop_ms, -1, 60000);
-      if (!initialized_ || width_ != width || height_ != height || loop_ms_ != loop_ms) {
+      loop_frames = std::clamp(loop_frames, 0, 60000);
+      if (!initialized_ || width_ != width || height_ != height || loop_ms_ != loop_ms || loop_frames_ != loop_frames) {
         reset();
         initialized_ = true;
         width_ = width;
         height_ = height;
         loop_ms_ = loop_ms;
+        loop_frames_ = loop_frames;
         last_ns_ = now_ns;
         result.full = true;
         return result;
       }
-      if (loop_ms == 0) {
+      if (loop_frames == 0 && loop_ms == 0) {
         result.full = true;
         return result;
       }
-      if (loop_ms < 0) {
+      if (loop_frames == 0 && loop_ms < 0) {
         return result;
       }
       const auto columns = std::min(6, width);
       const auto rows = std::min(5, height);
       const auto tile_count = columns * rows;
-      const long double period_ns = static_cast<long double>(loop_ms) * 1000000;
-      const auto elapsed = std::clamp(static_cast<long double>(now_ns) - last_ns_, 0.0L, period_ns);
-      last_ns_ = now_ns;
-      credit_ += elapsed * tile_count / period_ns;
+      if (loop_frames > 0) {
+        credit_ += static_cast<long double>(tile_count) / loop_frames;
+      } else {
+        const long double period_ns = static_cast<long double>(loop_ms) * 1000000;
+        const auto elapsed = std::clamp(static_cast<long double>(now_ns) - last_ns_, 0.0L, period_ns);
+        last_ns_ = now_ns;
+        credit_ += elapsed * tile_count / period_ns;
+      }
       const auto due = static_cast<int>(std::floor(credit_ + 1e-9L));
       credit_ = std::max(0.0L, credit_ - due);
       result.count = std::min(static_cast<std::size_t>(due), result.regions.size());
@@ -130,6 +137,7 @@ namespace video::cursor_focus {
     int width_ = 0;  ///< Current texture width.
     int height_ = 0;  ///< Current texture height.
     int loop_ms_ = 0;  ///< Current background mode and period.
+    int loop_frames_ = 0;  ///< Session frame-based sweep period, or zero for time-based work.
     std::int64_t last_ns_ = 0;  ///< Last converted frame time.
     long double credit_ = 0;  ///< Fractional tile work accumulated between frames.
     int next_tile_ = 0;  ///< Next tile in raster order.

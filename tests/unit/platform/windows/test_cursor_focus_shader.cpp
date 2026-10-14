@@ -341,6 +341,33 @@ TEST_F(CursorFocusShaderTest, FrozenCacheSkipsEmptyFocusRegions) {
   EXPECT_NEAR(pixels[(8 * width + 8) * 4], 128, 1);
 }
 
+TEST_F(CursorFocusShaderTest, AutomaticNormalPresetMatchesUnmodifiedPixels) {
+  settings_t saved {true, 96, 8, "rectangle", 640, 240, -1, true};
+  const auto constants = make_constants(select_settings(saved, 3000), geometry, 64, 48);
+  EXPECT_EQ(constants.enabled, 0);
+  EXPECT_EQ(render(constants), source);
+}
+
+TEST_F(CursorFocusShaderTest, FrameBasedCacheUpdatesRowsInFiveFrames) {
+  cursor_focus_background_t background;
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), {}, 0, 0, 5), S_OK);
+  replace_input(255);
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), {}, 0, 0, 5), S_OK);
+  auto *view = background.view();
+  context->PSSetShaderResources(1, 1, &view);
+  auto constants = make_constants({true, 32, 4}, geometry, 100, 70);
+  constants.history = 1;
+  const auto pixels = render(constants);
+  EXPECT_EQ(pixels[(8 * width + 8) * 4], 255);
+  EXPECT_NEAR(pixels[(40 * width + 8) * 4], 128, 1);
+  for (int frame = 2; frame <= 5; ++frame) {
+    ASSERT_EQ(background.update(device.get(), context.get(), input.get(), {}, 0, 0, 5), S_OK);
+  }
+  view = background.view();
+  context->PSSetShaderResources(1, 1, &view);
+  EXPECT_EQ(render(constants)[(40 * width + 8) * 4], 255);
+}
+
 TEST(CursorFocusFallbackTest, SoftwareDeviceRemainsAvailableWithFocusOnOrOff) {
   const auto original = config::video.cursor_focus.enabled;
   auto restore = util::fail_guard([&] {
@@ -349,7 +376,9 @@ TEST(CursorFocusFallbackTest, SoftwareDeviceRemainsAvailableWithFocusOnOrOff) {
   display_ddup_ram_t display;
   for (const bool enabled : {false, true}) {
     config::video.cursor_focus.enabled = enabled;
-    EXPECT_NE(display.make_avcodec_encode_device(platf::pix_fmt_e::nv12), nullptr);
+    auto device = display.make_avcodec_encode_device(platf::pix_fmt_e::nv12);
+    ASSERT_NE(device, nullptr);
+    device->set_cursor_focus({enabled, 96, 8});
   }
 }
 

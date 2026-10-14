@@ -70,3 +70,34 @@ TEST_P(AudioTest, TestEncode) {
   timer.join();
   capture.join();
 }
+
+TEST(AudioSessionTest, DisabledAudioHasNoBandwidthReservation) {
+  config_t settings {};
+  settings.channels = 2;
+  EXPECT_EQ(bandwidth_reservation_kbps(settings), 192);
+  settings.flags[config_t::HIGH_QUALITY] = true;
+  EXPECT_EQ(bandwidth_reservation_kbps(settings), 512);
+  settings.enabled = false;
+  EXPECT_EQ(bandwidth_reservation_kbps(settings), 0);
+}
+
+TEST(AudioSessionTest, DisabledSessionProducesNoPacketsUntilShutdown) {
+  const auto original = config::audio.stream;
+  auto restore = util::fail_guard([&] {
+    config::audio.stream = original;
+  });
+  config::audio.stream = true;
+  const auto session_mail = std::make_shared<safe::mail_raw_t>();
+  const auto shutdown = session_mail->event<bool>(mail::shutdown);
+  const auto packets = session_mail->queue<packet_t>(mail::audio_packets);
+  config_t settings {};
+  settings.enabled = false;
+  std::jthread worker([&] {
+    audio::capture(session_mail, settings, nullptr);
+  });
+  std::this_thread::sleep_for(25ms);
+  EXPECT_FALSE(packets->peek());
+  shutdown->raise(true);
+  worker.join();
+  EXPECT_FALSE(packets->peek());
+}

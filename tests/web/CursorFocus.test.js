@@ -55,6 +55,29 @@ describe('cursor detail preservation', () => {
     wrapper.unmount()
   })
 
+  it('selects automatic presets without erasing manual settings or changing geometry', async () => {
+    const config = structuredClone(configTabs.find(tab => tab.id === 'av').options)
+    const wrapper = mount(CursorFocus, { props: { config }, global: { mocks: { $t: key => key } } })
+    expect(config.cursor_focus_auto).toBe('disabled')
+    await wrapper.get('#cursor_focus').setValue(true)
+    await wrapper.get('#cursor_focus_shape').setValue('rectangle')
+    await wrapper.get('#cursor_focus_background_mode').setValue('rolling')
+    await wrapper.get('#cursor_focus_auto').setValue(true)
+    expect(config.cursor_focus_auto).toBe('enabled')
+    expect(wrapper.get('#cursor_focus_background_scale').element.disabled).toBe(true)
+    expect(wrapper.get('#cursor_focus_background_mode').element.disabled).toBe(true)
+    expect(wrapper.get('#cursor_focus_background_loop_seconds').element.disabled).toBe(true)
+    expect(wrapper.get('#cursor_focus_width').element.disabled).toBe(false)
+    expect(wrapper.get('#cursor_focus_height').element.disabled).toBe(false)
+    expect(config.cursor_focus_background_loop_ms).toBe(1000)
+    expect(config.cursor_focus_background_scale).toBe(4)
+    await wrapper.get('#cursor_focus_auto').setValue(false)
+    expect(wrapper.get('#cursor_focus_background_scale').element.disabled).toBe(false)
+    expect(wrapper.get('#cursor_focus_background_mode').element.disabled).toBe(false)
+    expect(wrapper.get('#cursor_focus_background_loop_seconds').element.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each(['windows', 'linux', 'freebsd', 'macos'])('shows controls only on a Windows host: %s', platform => {
     const config = structuredClone(configTabs.find(tab => tab.id === 'av').options)
     const wrapper = mount(AudioVideo, {
