@@ -187,3 +187,37 @@ TEST_F(ConfigPersistenceTest, ClipboardDirectionsRejectUnknownModes) {
   config::apply_config_for_test("clipboard_mode = unknown\n");
   EXPECT_EQ(config::input.clipboard_mode, "bidirectional");
 }
+
+TEST(ConfigDefaultsTest, CursorFocusIsDisabled) {
+  EXPECT_FALSE(config::video.cursor_focus.enabled);
+  EXPECT_EQ(config::video.cursor_focus.radius, 160);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 4);
+}
+
+TEST_F(ConfigPersistenceTest, CursorFocusParsesAndRejectsOutOfRangeValues) {
+  const auto original = config::video.cursor_focus;
+  auto restore = util::fail_guard([&] {
+    config::video.cursor_focus = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_config_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+
+  config::apply_config_for_test("cursor_focus = enabled\ncursor_focus_radius = 96\ncursor_focus_background_scale = 8\n");
+  EXPECT_TRUE(config::video.cursor_focus.enabled);
+  EXPECT_EQ(config::video.cursor_focus.radius, 96);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 8);
+  config::apply_config_for_test("cursor_focus_radius = 31\ncursor_focus_background_scale = 1\n");
+  EXPECT_EQ(config::video.cursor_focus.radius, 96);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 8);
+  config::apply_config_for_test("cursor_focus_radius = 1025\ncursor_focus_background_scale = 17\n");
+  EXPECT_EQ(config::video.cursor_focus.radius, 96);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 8);
+  config::apply_config_for_test("cursor_focus = disabled\ncursor_focus_radius = 32\ncursor_focus_background_scale = 2\n");
+  EXPECT_FALSE(config::video.cursor_focus.enabled);
+  EXPECT_EQ(config::video.cursor_focus.radius, 32);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 2);
+  config::apply_config_for_test("cursor_focus_radius = 1024\ncursor_focus_background_scale = 16\n");
+  EXPECT_EQ(config::video.cursor_focus.radius, 1024);
+  EXPECT_EQ(config::video.cursor_focus.background_scale, 16);
+}

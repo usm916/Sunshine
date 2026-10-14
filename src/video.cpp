@@ -2453,6 +2453,8 @@ namespace video {
       }
     }
 
+    std::shared_ptr<platf::img_t> cursor_focus_image;  ///< Latest capture retained only for cursor focus refreshes on static scenes.
+
     while (true) {
       bool requested_idr_frame = false;
 
@@ -2481,8 +2483,14 @@ namespace video {
             BOOST_LOG(error) << "Could not convert image"sv;
             return;
           }
+          if (config::video.cursor_focus.enabled) {
+            cursor_focus_image = std::move(img);
+          }
         } else if (!images->running()) {
           break;
+        } else if (cursor_focus_image && session->convert(*cursor_focus_image)) {
+          BOOST_LOG(error) << "Could not refresh cursor focus on the last captured image"sv;
+          return;
         }
       }
 
@@ -2785,7 +2793,7 @@ namespace video {
             ctx->idr_events->pop();
           }
 
-          if (frame_captured && pos->session->convert(*img)) {
+          if (img && (frame_captured || config::video.cursor_focus.enabled) && pos->session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
             ctx->shutdown_event->raise(true);
 

@@ -500,6 +500,22 @@ namespace platf::dxgi {
 
       auto &img = (img_d3d_t &) img_base;
       if (!img.blank) {
+        if (cursor_focus_buffer) {
+          POINT cursor {};
+          const bool cursor_known = GetPhysicalCursorPos(&cursor);
+          const auto &viewport = out_Y_or_YUV_viewports[0];
+          const ::video::cursor_focus::geometry_t geometry {
+            display->offset_x,
+            display->offset_y,
+            display->width,
+            display->height,
+            viewport.Width,
+            viewport.Height,
+            display->display_rotation == DXGI_MODE_ROTATION_UNSPECIFIED ? 0 : display->display_rotation - 1
+          };
+          const auto constants = ::video::cursor_focus::make_constants(config::video.cursor_focus, geometry, cursor.x, cursor.y, cursor_known);
+          device_ctx->UpdateSubresource(cursor_focus_buffer.get(), 0, nullptr, &constants, 0, 0);
+        }
         auto &img_ctx = img_ctx_map[img.id];
 
         // Open the shared capture texture with our ID3D11Device
@@ -918,6 +934,24 @@ namespace platf::dxgi {
       }
       display = nullptr;
 
+      if (config::video.cursor_focus.enabled) {
+        const D3D11_BUFFER_DESC focus_desc {
+          .ByteWidth = sizeof(::video::cursor_focus::shader_constants_t),
+          .Usage = D3D11_USAGE_DEFAULT,
+          .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
+        };
+        const ::video::cursor_focus::shader_constants_t constants {};
+        const D3D11_SUBRESOURCE_DATA focus_data {.pSysMem = &constants};
+        status = device->CreateBuffer(&focus_desc, &focus_data, &cursor_focus_buffer);
+        if (FAILED(status)) {
+          BOOST_LOG(error) << "Failed to create cursor focus constant buffer: " << util::log_hex(status);
+          return -1;
+        }
+        BOOST_LOG(info) << "Cursor focus enabled: radius=" << config::video.cursor_focus.radius
+                        << " output pixels, background scale=" << config::video.cursor_focus.background_scale;
+      }
+      device_ctx->PSSetConstantBuffers(2, 1, &cursor_focus_buffer);
+
       blend_disable = make_blend(device.get(), false, false);
       if (!blend_disable) {
         return -1;
@@ -1066,6 +1100,7 @@ namespace platf::dxgi {
 
     buf_t subsample_offset;  ///< Subsample offset.
     buf_t color_matrix;  ///< Color matrix.
+    buf_t cursor_focus_buffer;  ///< Mutable cursor-area parameters; null preserves the original sampling path.
 
     blend_t blend_disable;  ///< Blend disable.
     sampler_state_t sampler_linear;  ///< Sampler linear.

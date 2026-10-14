@@ -22,6 +22,7 @@ function mountAudioVideo(platform) {
         DisplayOutputSelector: true,
         DisplayDeviceOptions: true,
         DisplayModesSettings: true,
+        CursorFocus: true,
       },
     },
   })

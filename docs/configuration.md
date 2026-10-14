@@ -1563,6 +1563,78 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+### cursor_focus
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Preserve detail around the physical host cursor and simplify the background before video encoding, without changing the stream dimensions, scale, or input coordinates. This option is only supported on Windows D3D11 hardware conversion (NVENC and D3D11-backed AMF/Quick Sync). Unknown cursor positions or a cursor outside the streamed monitor keep the frame unchanged. Software encoding is not supported. Restart Sunshine after changes. Reducing detail does not impose a network bandwidth limit; lower the client bitrate separately.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### cursor_focus_radius
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Radius of the unchanged area in visible stream pixels, excluding letterbox bars. A smooth transition of one quarter of this radius surrounds the area. Requires cursor_focus.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            160
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">32-1024</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_radius = 96
+            @endcode</td>
+    </tr>
+</table>
+
+### cursor_focus_background_scale
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Coarse background cell size in visible stream pixels. Larger cells remove more detail. Requires cursor_focus. The background uses four linear samples per cell; it is not an exact box downsample.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            4
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">2-16</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_background_scale = 4
+            @endcode</td>
+    </tr>
+</table>
+
+
 ## Network
 
 ### upnp

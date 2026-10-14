@@ -134,3 +134,9 @@ Moonlight用Qt MSVC SDKは`uv run --no-project --with py7zr python scripts/custo
 配布フォルダの`sunshine.exe`を起動するときは、同じポートを使用する既存のSunshineサービスを先に停止します。この端末では`SunshineService`が動いているため、新版の実機確認時に切り替えが必要です。ビルドスクリプトは稼働中のサービスを変更しません。
 
 現在の本流はWindowsの仮想入力にVirtual HID Broker（最小版`2026.914.1218.10`）を使用します。キーボード・マウス・仮想ゲームパッドの実機検証には本流のインストール手順に従って必要なBrokerを用意してください。クリップボードのWindows APIテストはBrokerを使わずに実行できます。
+
+## マウス周辺の画質優先
+
+WindowsのD3D11ハードウェア変換向けに、表示倍率を保ってマウス周辺だけ細部を残す実験機能を追加しています。Web UIのAudio/Videoで「Preserve Detail near the Cursor (Experimental)」を有効にし、鮮明部の半径と背景セルサイズを設定します。既定OFF、保存後に再起動が必要です。既存Moonlightで受信できます。
+
+使い方、1Mbps回線の試験候補、比較表と検証の境界は[マウス周辺の画質優先](docs/custom/cursor-focus.md)を参照してください。配信範囲の切り出しとは別の機能です。

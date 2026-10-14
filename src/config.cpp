@@ -797,7 +797,8 @@ namespace config {
     },  // display_device
 
     0,  // max_bitrate
-    0  // minimum_fps_target (0 = framerate)
+    0,  // minimum_fps_target (0 = framerate)
+    {}  // cursor_focus (disabled)
   };
 
   /**
@@ -1737,6 +1738,9 @@ namespace config {
 
     int_f(vars, "max_bitrate", video.max_bitrate);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});
+    bool_f(vars, "cursor_focus", video.cursor_focus.enabled);
+    int_between_f(vars, "cursor_focus_radius", video.cursor_focus.radius, {32, 1024});
+    int_between_f(vars, "cursor_focus_background_scale", video.cursor_focus.background_scale, {2, 16});
 
     path_f(vars, "pkey", nvhttp.pkey);
     path_f(vars, "cert", nvhttp.cert);

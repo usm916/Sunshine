@@ -5,6 +5,7 @@
 // local includes
 #include "display.h"
 #include "misc.h"
+#include "src/config.h"
 #include "src/logging.h"
 
 namespace platf {
@@ -419,6 +420,9 @@ namespace platf::dxgi {
   }
 
   std::unique_ptr<avcodec_encode_device_t> display_ram_t::make_avcodec_encode_device(pix_fmt_e pix_fmt) {
+    if (config::video.cursor_focus.enabled) {
+      BOOST_LOG(warning) << "Cursor focus is unavailable with RAM/software conversion; streaming the unchanged frame.";
+    }
     return std::make_unique<avcodec_encode_device_t>();
   }
 

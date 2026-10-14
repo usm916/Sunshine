@@ -10,10 +10,11 @@ cbuffer color_matrix_cbuffer : register(b0) {
 };
 
 #include "include/base_vs_types.hlsl"
+#include "include/cursor_focus.hlsl"
 
 float main_ps(vertex_t input) : SV_Target
 {
-    float3 rgb = CONVERT_FUNCTION(image.Sample(def_sampler, input.tex_coord, 0).rgb);
+    float3 rgb = CONVERT_FUNCTION(cursor_focus_sample(input.tex_coord));
 
     float y = dot(color_vec_y.xyz, rgb) + color_vec_y.w;
 
