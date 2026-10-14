@@ -27,4 +27,7 @@ gcc -std=c11 -Wall -Wextra -Werror \
 ./cmake-build-custom/clipboard-protocol-test.exe
 cmake --install cmake-build-custom --strip --prefix "$PWD/cmake-build-custom/package"
 cp LICENSE README.custom.md cmake-build-custom/package/
+mkdir -p cmake-build-custom/package/scripts/custom
+cp scripts/custom/start-sunshine.ps1 cmake-build-custom/package/scripts/custom/
+cp "scripts/custom/Start Sunshine.cmd" cmake-build-custom/package/
 ./cmake-build-custom/package/sunshine.exe --help
