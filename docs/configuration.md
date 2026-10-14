@@ -1584,6 +1584,31 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+### cursor_focus_shape
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Shape of the unchanged area following the physical cursor. Circle uses cursor_focus_radius; rectangle uses cursor_focus_width and cursor_focus_height. Requires cursor_focus; restart after changes.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            circle
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">circle, rectangle</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_shape = rectangle
+            @endcode</td>
+    </tr>
+</table>
+
 ### cursor_focus_radius
 
 <table>
@@ -1605,6 +1630,56 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
         <td>Example</td>
         <td colspan="2">@code{}
             cursor_focus_radius = 96
+            @endcode</td>
+    </tr>
+</table>
+
+### cursor_focus_width
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Width of the unchanged rectangle in visible stream pixels, excluding letterbox bars. A transition extends outside the rectangle. Requires cursor_focus_shape = rectangle.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            512
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">32-8192</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_width = 640
+            @endcode</td>
+    </tr>
+</table>
+
+### cursor_focus_height
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Height of the unchanged rectangle in visible stream pixels, excluding letterbox bars. Requires cursor_focus_shape = rectangle.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            320
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">32-8192</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_height = 240
             @endcode</td>
     </tr>
 </table>
@@ -1634,6 +1709,30 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+### cursor_focus_background_loop_ms
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">Background update mode and target sweep duration. Zero updates every frame; minus one stops scheduled background updates; positive values refresh 30 background tiles in raster order over this many milliseconds. At most eight tiles update per converted frame, so very short loops or low FPS can take longer. The focus and the just-vacated area update every frame and retain their refreshed contents. The first valid frame initializes the whole background. Requires Windows D3D11 cursor_focus; software encoding is unsupported. This does not pace network packets or limit bandwidth. Restart after changes.</td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">-1-60000</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            cursor_focus_background_loop_ms = 1000
+            @endcode</td>
+    </tr>
+</table>
 
 ## Network
 

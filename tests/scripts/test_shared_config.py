@@ -150,7 +150,7 @@ class SharedConfigTests(unittest.TestCase):
         shared = self.root / "default shared"
         shared.mkdir()
         details = self.prepared(None, shared)
-        self.assertEqual(details["ExecutablePath"], str(ROOT / "cmake-build-custom/package-cursor-focus/sunshine.exe"))
+        self.assertEqual(details["ExecutablePath"], str(ROOT / "cmake-build-custom/package/sunshine.exe"))
         self.assertIsNone(details["MigratedFrom"])
 
     def test_native_version_launch_preserves_shared_identity(self):

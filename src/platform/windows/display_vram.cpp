@@ -19,6 +19,7 @@ extern "C" {
 #include <boost/algorithm/string/predicate.hpp>
 
 // local includes
+#include "cursor_focus_background.h"
 #include "display.h"
 #include "misc.h"
 #include "src/config.h"
@@ -500,6 +501,7 @@ namespace platf::dxgi {
 
       auto &img = (img_d3d_t &) img_base;
       if (!img.blank) {
+        ::video::cursor_focus::shader_constants_t focus_constants {};
         if (cursor_focus_buffer) {
           POINT cursor {};
           const bool cursor_known = GetPhysicalCursorPos(&cursor);
@@ -513,8 +515,7 @@ namespace platf::dxgi {
             viewport.Height,
             display->display_rotation == DXGI_MODE_ROTATION_UNSPECIFIED ? 0 : display->display_rotation - 1
           };
-          const auto constants = ::video::cursor_focus::make_constants(config::video.cursor_focus, geometry, cursor.x, cursor.y, cursor_known);
-          device_ctx->UpdateSubresource(cursor_focus_buffer.get(), 0, nullptr, &constants, 0, 0);
+          focus_constants = ::video::cursor_focus::make_constants(config::video.cursor_focus, geometry, cursor.x, cursor.y, cursor_known);
         }
         auto &img_ctx = img_ctx_map[img.id];
 
@@ -528,6 +529,22 @@ namespace platf::dxgi {
         if (status != S_OK) {
           BOOST_LOG(error) << "Failed to acquire encoder mutex [0x"sv << util::hex(status).to_string_view() << ']';
           return -1;
+        }
+
+        if (cursor_focus_buffer) {
+          if (focus_constants.enabled && !img.dummy && config::video.cursor_focus.background_loop_ms != 0) {
+            const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            status = cursor_focus_background.update(device.get(), device_ctx.get(), img_ctx.encoder_texture.get(), focus_constants, config::video.cursor_focus.background_loop_ms, now_ns);
+            if (FAILED(status)) {
+              img_ctx.encoder_mutex->ReleaseSync(0);
+              BOOST_LOG(error) << "Failed to update cursor focus background: " << util::log_hex(status);
+              return -1;
+            }
+            focus_constants.history = 1;
+          } else {
+            cursor_focus_background.reset();
+          }
+          device_ctx->UpdateSubresource(cursor_focus_buffer.get(), 0, nullptr, &focus_constants, 0, 0);
         }
 
         auto draw = [&](auto &input, auto &y_or_yuv_viewports, auto &uv_viewport) {
@@ -563,13 +580,15 @@ namespace platf::dxgi {
         }
 
         // Draw captured frame
+        auto *background_view = focus_constants.history ? cursor_focus_background.view() : nullptr;
+        device_ctx->PSSetShaderResources(1, 1, &background_view);
         draw(img_ctx.encoder_input_res, out_Y_or_YUV_viewports, out_UV_viewport);
 
         // Release encoder mutex to allow capture code to reuse this image
         img_ctx.encoder_mutex->ReleaseSync(0);
 
-        ID3D11ShaderResourceView *emptyShaderResourceView = nullptr;
-        device_ctx->PSSetShaderResources(0, 1, &emptyShaderResourceView);
+        ID3D11ShaderResourceView *emptyShaderResourceViews[2] = {};
+        device_ctx->PSSetShaderResources(0, 2, emptyShaderResourceViews);
       }
 
       return 0;
@@ -948,7 +967,10 @@ namespace platf::dxgi {
           return -1;
         }
         BOOST_LOG(info) << "Cursor focus enabled: radius=" << config::video.cursor_focus.radius
-                        << " output pixels, background scale=" << config::video.cursor_focus.background_scale;
+                        << " output pixels, shape=" << config::video.cursor_focus.shape
+                        << ", rectangle=" << config::video.cursor_focus.width << "x" << config::video.cursor_focus.height
+                        << ", background scale=" << config::video.cursor_focus.background_scale
+                        << ", background loop=" << config::video.cursor_focus.background_loop_ms << "ms";
       }
       device_ctx->PSSetConstantBuffers(2, 1, &cursor_focus_buffer);
 
@@ -1101,6 +1123,7 @@ namespace platf::dxgi {
     buf_t subsample_offset;  ///< Subsample offset.
     buf_t color_matrix;  ///< Color matrix.
     buf_t cursor_focus_buffer;  ///< Mutable cursor-area parameters; null preserves the original sampling path.
+    cursor_focus_background_t cursor_focus_background;  ///< Per-session retained background and refresh timing.
 
     blend_t blend_disable;  ///< Blend disable.
     sampler_state_t sampler_linear;  ///< Sampler linear.

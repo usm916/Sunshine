@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace video::cursor_focus {
   /**
@@ -18,6 +19,10 @@ namespace video::cursor_focus {
     bool enabled = false;  ///< Preserve detail near the cursor and simplify the background.
     int radius = 160;  ///< Radius of the unchanged region, in output pixels.
     int background_scale = 4;  ///< Coarse background cell size in output pixels.
+    std::string shape = "circle";  ///< Circle or cursor-centered rectangle.
+    int width = 512;  ///< Width of the unchanged rectangle, in output pixels.
+    int height = 320;  ///< Height of the unchanged rectangle, in output pixels.
+    int background_loop_ms = 0;  ///< Full background refresh target; zero is live, minus one freezes it.
   };
 
   /**
@@ -34,7 +39,7 @@ namespace video::cursor_focus {
   };
 
   /**
-   * @brief Two 16-byte HLSL constant-buffer rows in capture-texture coordinates.
+   * @brief Three 16-byte HLSL constant-buffer rows in capture-texture coordinates.
    */
   struct shader_constants_t {
     std::array<float, 2> center {};  ///< Cursor center in normalized capture-texture coordinates.
@@ -43,9 +48,12 @@ namespace video::cursor_focus {
     float feather = 0;  ///< Width of the smooth transition to the coarse background.
     float background_scale = 0;  ///< Coarse-cell size, in output pixels.
     float enabled = 0;  ///< One for valid cursor geometry, zero for passthrough.
+    std::array<float, 2> half_size {};  ///< Rectangle half-extents along capture-texture axes.
+    float rectangle = 0;  ///< One selects a rectangle, zero selects a circle.
+    float history = 0;  ///< One samples the held background texture.
   };
 
-  static_assert(sizeof(shader_constants_t) == 32);
+  static_assert(sizeof(shader_constants_t) == 48);
 
   /**
    * @brief Map a physical desktop cursor to the rotated capture texture.
@@ -53,7 +61,7 @@ namespace video::cursor_focus {
    * Unknown or off-display cursors and invalid geometry keep the frame unchanged.
    * The output viewport preserves the existing scaling and letterbox mapping.
    *
-   * @param settings Configured detail radius and background cell size.
+   * @param settings Configured shape, dimensions, radius and background cell size.
    * @param geometry Streamed display and visible output viewport.
    * @param cursor_x Physical desktop cursor X coordinate.
    * @param cursor_y Physical desktop cursor Y coordinate.
@@ -94,6 +102,14 @@ namespace video::cursor_focus {
     result.radius = static_cast<float>(std::clamp(settings.radius, 32, 1024));
     result.feather = result.radius * 0.25f;
     result.background_scale = static_cast<float>(std::clamp(settings.background_scale, 2, 16));
+    result.rectangle = settings.shape == "rectangle" ? 1.0f : 0.0f;
+    result.half_size = {static_cast<float>(std::clamp(settings.width, 32, 8192)) * 0.5f, static_cast<float>(std::clamp(settings.height, 32, 8192)) * 0.5f};
+    if (geometry.rotation & 1) {
+      std::swap(result.half_size[0], result.half_size[1]);
+    }
+    if (result.rectangle) {
+      result.feather = std::min(result.half_size[0], result.half_size[1]) * 0.25f;
+    }
     result.enabled = 1.0f;
     return result;
   }

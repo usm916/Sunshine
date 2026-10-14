@@ -4,7 +4,7 @@
 
 ## このチェックアウトでの起動
 
-リポジトリ直下の `Start Sunshine Custom.cmd` を起動する。既定では `cmake-build-custom/package-cursor-focus/sunshine.exe` を使用する。
+リポジトリ直下の `Start Sunshine Custom.cmd` を起動する。既定では `cmake-build-custom/package/sunshine.exe` を使用する。未作成の場合は従来のマウス優先パッケージを使用する。
 
 共通フォルダがまだ存在しない初回だけ、選んだ実行ファイルの隣の `config` フォルダをコピーする。現在の試用版で設定した管理パスワードをそのまま使える。元の設定フォルダは残る。共通フォルダがある場合は上書きしない。
 

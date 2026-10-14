@@ -192,6 +192,10 @@ TEST(ConfigDefaultsTest, CursorFocusIsDisabled) {
   EXPECT_FALSE(config::video.cursor_focus.enabled);
   EXPECT_EQ(config::video.cursor_focus.radius, 160);
   EXPECT_EQ(config::video.cursor_focus.background_scale, 4);
+  EXPECT_EQ(config::video.cursor_focus.shape, "circle");
+  EXPECT_EQ(config::video.cursor_focus.width, 512);
+  EXPECT_EQ(config::video.cursor_focus.height, 320);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 0);
 }
 
 TEST_F(ConfigPersistenceTest, CursorFocusParsesAndRejectsOutOfRangeValues) {
@@ -220,4 +224,39 @@ TEST_F(ConfigPersistenceTest, CursorFocusParsesAndRejectsOutOfRangeValues) {
   config::apply_config_for_test("cursor_focus_radius = 1024\ncursor_focus_background_scale = 16\n");
   EXPECT_EQ(config::video.cursor_focus.radius, 1024);
   EXPECT_EQ(config::video.cursor_focus.background_scale, 16);
+}
+
+TEST_F(ConfigPersistenceTest, CursorRectangleAndBackgroundLoopValidateConfiguration) {
+  const auto original = config::video.cursor_focus;
+  auto restore = util::fail_guard([&] {
+    config::video.cursor_focus = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_config_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  config::apply_config_for_test("cursor_focus_shape = rectangle\ncursor_focus_width = 640\ncursor_focus_height = 240\ncursor_focus_background_loop_ms = 1000\n");
+  EXPECT_EQ(config::video.cursor_focus.shape, "rectangle");
+  EXPECT_EQ(config::video.cursor_focus.width, 640);
+  EXPECT_EQ(config::video.cursor_focus.height, 240);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 1000);
+  config::apply_config_for_test("cursor_focus_shape = invalid\ncursor_focus_width = 31\ncursor_focus_height = 8193\ncursor_focus_background_loop_ms = -2\n");
+  EXPECT_EQ(config::video.cursor_focus.shape, "rectangle");
+  EXPECT_EQ(config::video.cursor_focus.width, 640);
+  EXPECT_EQ(config::video.cursor_focus.height, 240);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 1000);
+  config::apply_config_for_test("cursor_focus_width = 8193\ncursor_focus_height = 31\ncursor_focus_background_loop_ms = 60001\n");
+  EXPECT_EQ(config::video.cursor_focus.width, 640);
+  EXPECT_EQ(config::video.cursor_focus.height, 240);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 1000);
+  config::apply_config_for_test("cursor_focus_shape = circle\ncursor_focus_width = 32\ncursor_focus_height = 8192\ncursor_focus_background_loop_ms = -1\n");
+  EXPECT_EQ(config::video.cursor_focus.shape, "circle");
+  EXPECT_EQ(config::video.cursor_focus.width, 32);
+  EXPECT_EQ(config::video.cursor_focus.height, 8192);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, -1);
+  config::apply_config_for_test("cursor_focus_width = 8192\ncursor_focus_height = 32\ncursor_focus_background_loop_ms = 60000\n");
+  EXPECT_EQ(config::video.cursor_focus.width, 8192);
+  EXPECT_EQ(config::video.cursor_focus.height, 32);
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 60000);
+  config::apply_config_for_test("cursor_focus_background_loop_ms = 0\n");
+  EXPECT_EQ(config::video.cursor_focus.background_loop_ms, 0);
 }

@@ -5,7 +5,7 @@
 .SYNOPSIS
 Reuses Sunshine Custom credentials, pairings and settings across builds.
 .PARAMETER ExecutablePath
-Sunshine executable to run. Defaults to the cursor-focus package in this checkout.
+Sunshine executable to run. Defaults to the current package in this checkout.
 .PARAMETER ConfigDirectory
 Shared configuration directory, independent of the selected build.
 .PARAMETER PrepareOnly
@@ -22,7 +22,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
-    $ExecutablePath = Join-Path $PSScriptRoot '..\..\cmake-build-custom\package-cursor-focus\sunshine.exe'
+    $ExecutablePath = Join-Path $PSScriptRoot '..\..\cmake-build-custom\package\sunshine.exe'
+    if (!(Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
+        $ExecutablePath = Join-Path $PSScriptRoot '..\..\cmake-build-custom\package-cursor-focus\sunshine.exe'
+    }
 }
 $executable = (Resolve-Path -LiteralPath $ExecutablePath).ProviderPath
 if (!(Test-Path -LiteralPath $executable -PathType Leaf)) {

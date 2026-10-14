@@ -1741,6 +1741,10 @@ namespace config {
     bool_f(vars, "cursor_focus", video.cursor_focus.enabled);
     int_between_f(vars, "cursor_focus_radius", video.cursor_focus.radius, {32, 1024});
     int_between_f(vars, "cursor_focus_background_scale", video.cursor_focus.background_scale, {2, 16});
+    string_restricted_f(vars, "cursor_focus_shape", video.cursor_focus.shape, {"circle"sv, "rectangle"sv});
+    int_between_f(vars, "cursor_focus_width", video.cursor_focus.width, {32, 8192});
+    int_between_f(vars, "cursor_focus_height", video.cursor_focus.height, {32, 8192});
+    int_between_f(vars, "cursor_focus_background_loop_ms", video.cursor_focus.background_loop_ms, {-1, 60000});
 
     path_f(vars, "pkey", nvhttp.pkey);
     path_f(vars, "cert", nvhttp.cert);

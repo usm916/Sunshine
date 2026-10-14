@@ -63,8 +63,12 @@
       "max_bitrate": 0,
       "minimum_fps_target": 0,
       "cursor_focus": "disabled",
+      "cursor_focus_shape": "circle",
       "cursor_focus_radius": 160,
-      "cursor_focus_background_scale": 4
+      "cursor_focus_width": 512,
+      "cursor_focus_height": 320,
+      "cursor_focus_background_scale": 4,
+      "cursor_focus_background_loop_ms": 0
     }
   },
   {

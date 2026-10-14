@@ -16,6 +16,7 @@
   // local includes
   #include <src/config.h>
   #include <src/file_handler.h>
+  #include <src/platform/windows/cursor_focus_background.h>
   #include <src/platform/windows/display.h>
   #include <src/video_cursor_focus.h>
 
@@ -64,7 +65,7 @@ protected:
       .ArraySize = 1,
       .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
       .SampleDesc = {1, 0},
-      .Usage = D3D11_USAGE_IMMUTABLE,
+      .Usage = D3D11_USAGE_DEFAULT,
       .BindFlags = D3D11_BIND_SHADER_RESOURCE,
     };
     const D3D11_SUBRESOURCE_DATA data {.pSysMem = source.data(), .SysMemPitch = width * 4};
@@ -148,6 +149,36 @@ float4 main_ps(vertex_t v) : SV_Target { return float4(cursor_focus_sample(v.uv)
     return pixels;
   }
 
+  /**
+   * @brief Replace captured pixels with a uniform color to detect stale versus fresh regions.
+   * @param red Red channel value for every input pixel.
+   */
+  void replace_input(std::uint8_t red) {
+    auto pixels = source;
+    for (std::size_t offset = 0; offset < pixels.size(); offset += 4) {
+      pixels[offset] = red;
+      pixels[offset + 1] = 40;
+      pixels[offset + 2] = 80;
+    }
+    context->UpdateSubresource(input.get(), 0, nullptr, pixels.data(), width * 4, 0);
+  }
+
+  /**
+   * @brief Update and render the production GPU cache together with the production shader.
+   * @param background Cache shared across calls.
+   * @param constants Shape and cursor geometry.
+   * @param loop_ms Background mode and target duration.
+   * @param now_ns Simulated monotonic time.
+   * @return Actual rendered pixels.
+   */
+  std::vector<std::uint8_t> render_background(cursor_focus_background_t &background, shader_constants_t constants, int loop_ms, std::int64_t now_ns) {
+    EXPECT_EQ(background.update(device.get(), context.get(), input.get(), constants, loop_ms, now_ns), S_OK);
+    auto *view = background.view();
+    context->PSSetShaderResources(1, 1, &view);
+    constants.history = 1;
+    return render(constants);
+  }
+
   static constexpr int width = 128;  ///< Test texture width.
   static constexpr int height = 96;  ///< Test texture height.
   const std::filesystem::path shader_dir = std::filesystem::path {SUNSHINE_SOURCE_DIR} / "src_assets/windows/assets/shaders/directx";  ///< Production shader directory.
@@ -206,6 +237,108 @@ TEST_F(CursorFocusShaderTest, MovesSharpAreaWithTheCursorWithoutMovingImageCoord
   EXPECT_EQ(second[new_center], source[new_center]);
   EXPECT_EQ(second[new_center + 1], source[new_center + 1]);
   EXPECT_EQ(second[new_center + 2], source[new_center + 2]);
+}
+
+TEST_F(CursorFocusShaderTest, RectanglePreservesWideDetailWithoutMakingHeightEqualToWidth) {
+  settings_t settings {true, 32, 4};
+  settings.shape = "rectangle";
+  settings.width = 80;
+  settings.height = 32;
+  const auto pixels = render(make_constants(settings, geometry, 64, 48));
+  for (int y = 35; y < 61; ++y) {
+    for (int x = 26; x < 102; ++x) {
+      const auto offset = (y * width + x) * 4;
+      EXPECT_EQ(pixels[offset], source[offset]);
+      EXPECT_EQ(pixels[offset + 1], source[offset + 1]);
+      EXPECT_EQ(pixels[offset + 2], source[offset + 2]);
+    }
+  }
+  EXPECT_NEAR(pixels[(8 * width + 64) * 4], 128, 1);
+}
+
+TEST_F(CursorFocusShaderTest, FrozenBackgroundRetainsVisitedPixelsAndKeepsTheMovingFocusLive) {
+  settings_t settings {true, 32, 4};
+  settings.shape = "rectangle";
+  settings.width = settings.height = 32;
+  cursor_focus_background_t background;
+  EXPECT_EQ(background.view(), nullptr);
+  const auto left = make_constants(settings, geometry, 20, 48);
+  const auto right = make_constants(settings, geometry, 100, 48);
+  render_background(background, left, -1, 0);
+  replace_input(255);
+  const auto first = render_background(background, left, -1, 100000000);
+  EXPECT_EQ(first[(48 * width + 20) * 4], 255);
+  EXPECT_NEAR(first[(8 * width + 60) * 4], 128, 1);
+  replace_input(64);
+  const auto moved = render_background(background, right, -1, 200000000);
+  EXPECT_EQ(moved[(48 * width + 100) * 4], 64);
+  EXPECT_EQ(moved[(48 * width + 20) * 4], 64);
+  replace_input(0);
+  const auto held = render_background(background, right, -1, 300000000);
+  EXPECT_EQ(held[(48 * width + 100) * 4], 0);
+  EXPECT_EQ(held[(48 * width + 20) * 4], 64);
+  EXPECT_NEAR(held[(8 * width + 60) * 4], 128, 1);
+  background.reset();
+  const auto reset = render_background(background, right, -1, 400000000);
+  EXPECT_EQ(reset[(8 * width + 60) * 4], 0);
+}
+
+TEST_F(CursorFocusShaderTest, RollingBackgroundRefreshesOneTileAndLeavesOtherTilesHeld) {
+  cursor_focus_background_t background;
+  const auto constants = make_constants({true, 32, 4}, geometry, 100, 48);
+  render_background(background, constants, 1000, 0);
+  replace_input(255);
+  const auto first = render_background(background, constants, 1000, 33333334);
+  EXPECT_EQ(first[(8 * width + 8) * 4], 255);
+  EXPECT_NEAR(first[(8 * width + 48) * 4], 128, 1);
+  EXPECT_EQ(first[(48 * width + 100) * 4], 255);
+  const auto second = render_background(background, constants, 1000, 66666667);
+  EXPECT_EQ(second[(8 * width + 28) * 4], 255);
+  EXPECT_NEAR(second[(8 * width + 48) * 4], 128, 1);
+}
+
+TEST_F(CursorFocusShaderTest, BackgroundCacheReinitializesAfterDimensionAndFormatChanges) {
+  cursor_focus_background_t background;
+  auto constants = make_constants({true, 32, 4}, geometry, 64, 48);
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), constants, -1, 0), S_OK);
+  D3D11_TEXTURE2D_DESC desc {};
+  input->GetDesc(&desc);
+  desc.Width = 64;
+  texture2d_t resized;
+  ASSERT_TRUE(SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &resized)));
+  ASSERT_EQ(background.update(device.get(), context.get(), resized.get(), constants, -1, 1), S_OK);
+  desc.Height = 64;
+  desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  texture2d_t reformatted;
+  ASSERT_TRUE(SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &reformatted)));
+  ASSERT_EQ(background.update(device.get(), context.get(), reformatted.get(), constants, -1, 2), S_OK);
+}
+
+TEST_F(CursorFocusShaderTest, BackgroundCacheRejectsUnsupportedViewsWithoutReplacingValidResources) {
+  cursor_focus_background_t background;
+  const auto constants = make_constants({true, 32, 4}, geometry, 64, 48);
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), constants, -1, 0), S_OK);
+  auto *original_view = background.view();
+  D3D11_TEXTURE2D_DESC desc {};
+  input->GetDesc(&desc);
+  desc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+  texture2d_t typeless;
+  ASSERT_TRUE(SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &typeless)));
+  EXPECT_TRUE(FAILED(background.update(device.get(), context.get(), typeless.get(), constants, -1, 1)));
+  EXPECT_EQ(background.view(), original_view);
+}
+
+TEST_F(CursorFocusShaderTest, FrozenCacheSkipsEmptyFocusRegions) {
+  cursor_focus_background_t background;
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), {}, -1, 0), S_OK);
+  replace_input(255);
+  ASSERT_EQ(background.update(device.get(), context.get(), input.get(), {}, -1, 100000000), S_OK);
+  auto *view = background.view();
+  context->PSSetShaderResources(1, 1, &view);
+  auto constants = make_constants({true, 32, 4}, geometry, 100, 48);
+  constants.history = 1;
+  const auto pixels = render(constants);
+  EXPECT_NEAR(pixels[(8 * width + 8) * 4], 128, 1);
 }
 
 TEST(CursorFocusFallbackTest, SoftwareDeviceRemainsAvailableWithFocusOnOrOff) {
