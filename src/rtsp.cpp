@@ -1253,12 +1253,30 @@ namespace rtsp_stream {
 #ifdef _WIN32
     config.monitor.cursor_focus = video::cursor_focus::select_settings(config::video.cursor_focus, configuredBitrateKbps > 0 ? configuredBitrateKbps : config.monitor.bitrate);
 #endif
-    config.audio.enabled = config::audio.stream && !config.monitor.cursor_focus.enabled;
+    if (::config::video.low_bandwidth.mode != "disabled") {
+      config.monitor.low_bandwidth = ::config::video.low_bandwidth;
+      const auto requested = configuredBitrateKbps > 0 ? configuredBitrateKbps : config.monitor.bitrate;
+      const auto ceiling = video::low_bandwidth::select_ceiling(config.monitor.low_bandwidth, requested, ::config::video.max_bitrate);
+      config.monitor.focus_template = ::config::video.cursor_focus;
+      config.monitor.low_profile = video::low_bandwidth::make_profile(config.monitor.low_bandwidth, static_cast<std::uint32_t>(std::max<std::int64_t>(32, ceiling)), config.monitor.framerate, config.packetsize + 96, ::config::stream.fec_percentage > 0 ? config.minRequiredFecPackets : 0, ::config::stream.fec_percentage);
+      config.monitor.low_telemetry = std::make_shared<video::low_bandwidth::telemetry_t>();
+#ifdef _WIN32
+      config.monitor.cursor_focus = video::low_bandwidth::focus_settings(config.monitor.focus_template, config.monitor.low_profile.wire_kbps);
+#endif
+      video::configure_session_audio(config.audio, config.monitor, config::audio.stream, config.packetsize + 96, ::config::stream.fec_percentage > 0 ? config.minRequiredFecPackets : 0, ::config::stream.fec_percentage);
+      BOOST_LOG(info) << "low_bandwidth_session mode=" << config.monitor.low_bandwidth.mode
+                      << " wire_kbps=" << config.monitor.low_profile.wire_kbps
+                      << " video_kbps=" << config.monitor.low_profile.video_kbps << " fps=" << config.monitor.low_profile.fps
+                      << " requested_kbps=" << requested << " cap_kbps=" << config.monitor.low_bandwidth.target_kbps;
+    }
+    if (config.monitor.low_bandwidth.mode == "disabled") {
+      video::configure_session_audio(config.audio, config.monitor, config::audio.stream, config.packetsize + 96, ::config::stream.fec_percentage > 0 ? config.minRequiredFecPackets : 0, ::config::stream.fec_percentage);
+    }
     BOOST_LOG(info) << "Session cursor focus: " << (config.monitor.cursor_focus.enabled ? "enabled" : "disabled")
                     << ", background scale=" << config.monitor.cursor_focus.background_scale
                     << ", loop=" << config.monitor.cursor_focus.background_loop_ms << "ms/"
                     << config.monitor.cursor_focus.background_loop_frames << " frames, audio="
-                    << (config.audio.enabled ? "enabled" : "disabled");
+                    << ((audio::active_generation(config.audio) & 1) ? "enabled" : "disabled");
 
     // If the client sent a configured bitrate, we will choose the actual bitrate ourselves
     // by using FEC percentage and audio quality settings. If the calculated bitrate ends up
@@ -1284,6 +1302,10 @@ namespace rtsp_stream {
 
       BOOST_LOG(debug) << "Final adjusted video encoding bitrate is "sv << configuredBitrateKbps << " Kbps"sv;
       config.monitor.bitrate = (int) configuredBitrateKbps;
+    }
+
+    if (config.monitor.low_bandwidth.mode != "disabled") {
+      config.monitor.bitrate = static_cast<int>(config.monitor.low_profile.video_kbps);
     }
 
     if (config.monitor.videoFormat == 1 && video::active_hevc_mode == 1) {

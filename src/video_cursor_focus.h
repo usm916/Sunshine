@@ -25,10 +25,13 @@ namespace video::cursor_focus {
     int background_loop_ms = 0;  ///< Full background refresh target; zero is live, minus one freezes it.
     bool automatic = false;  ///< Select a background preset from the client's requested bitrate.
     int background_loop_frames = 0;  ///< Session-only sweep length in converted frames; zero uses milliseconds.
+    bool follow_text = true;  ///< Prefer an available text caret after keyboard activity.
+    int mouse_move_threshold = 6;  ///< Physical mouse displacement that returns focus from caret to mouse.
   };
 
   /**
    * @brief Select immutable session settings without modifying the saved configuration.
+   * @details Automatic background cells use sizes 6, 4, 3 and 2 as the bitrate increases.
    *
    * @param configured User's focus geometry and manual settings.
    * @param requested_kbps Client bitrate before audio and FEC reservations; nonpositive values retain manual settings.
@@ -46,13 +49,13 @@ namespace video::cursor_focus {
       configured.background_loop_ms = 0;
       configured.background_loop_frames = 5;
     } else if (requested_kbps >= 1000) {
-      configured.background_scale = 4;
+      configured.background_scale = 3;
       configured.background_loop_ms = 1000;
     } else if (requested_kbps > 250) {
-      configured.background_scale = 12;
+      configured.background_scale = 4;
       configured.background_loop_ms = 3000;
     } else {
-      configured.background_scale = 16;
+      configured.background_scale = 6;
       configured.background_loop_ms = 5000;
     }
     return configured;

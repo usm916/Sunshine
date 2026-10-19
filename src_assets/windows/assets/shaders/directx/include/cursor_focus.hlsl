@@ -14,6 +14,13 @@ cbuffer cursor_focus_cbuffer : register(b2) {
     float focus_history; ///< One samples the held background texture.
 };
 
+cbuffer viewport_crop_cbuffer : register(b3) {
+    float2 crop_origin; ///< Rotated source origin.
+    float2 crop_scale; ///< Rotated source extent relative to the full texture.
+    float crop_enabled; ///< Zero preserves whole-monitor scaling.
+    float3 crop_padding; ///< Align to two constant-buffer rows.
+};
+
 Texture2D focus_background_image : register(t1); ///< Held capture pixels for rolling background updates.
 
 /**
@@ -36,6 +43,9 @@ float3 cursor_focus_background_sample(float2 uv)
  */
 float3 cursor_focus_sample(float2 uv)
 {
+    if (crop_enabled != 0) {
+        uv = crop_origin + uv * crop_scale;
+    }
     float3 detail = image.Sample(def_sampler, uv, 0).rgb;
     if (focus_enabled == 0) {
         return detail;

@@ -6,7 +6,9 @@ import AdapterNameSelector from './audiovideo/AdapterNameSelector.vue'
 import DisplayOutputSelector from './audiovideo/DisplayOutputSelector.vue'
 import DisplayDeviceOptions from "./audiovideo/DisplayDeviceOptions.vue";
 import DisplayModesSettings from "./audiovideo/DisplayModesSettings.vue";
+import ViewportCrop from "./audiovideo/ViewportCrop.vue";
 import CursorFocus from "./audiovideo/CursorFocus.vue";
+import LowBandwidth from "./audiovideo/LowBandwidth.vue";
 import Checkbox from "../../Checkbox.vue";
 
 const props = defineProps({
@@ -111,7 +113,9 @@ const config = ref(props.config)
 
     <PlatformLayout :platform="platform">
       <template #windows>
-        <CursorFocus :config="config" />
+        <ViewportCrop :config="config" />
+        <LowBandwidth :config="config" />
+    <CursorFocus :config="config" />
       </template>
     </PlatformLayout>
   </div>

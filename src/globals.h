@@ -56,6 +56,9 @@ namespace mail {
   // Local mail
   MAIL(touch_port);  ///< Touch port.
   MAIL(idr);  ///< IDR.
+  MAIL(low_bandwidth);  ///< Atomic low-rate encoder/FPS/background updates.
+  MAIL(video_bitrate);  ///< Runtime encoder bitrate requests.
+  MAIL(video_bitrate_result);  ///< Runtime encoder bitrate acknowledgements.
   MAIL(invalidate_ref_frames);  ///< Invalidate ref frames.
   MAIL(gamepad_feedback);  ///< Gamepad feedback.
   MAIL(clipboard);  ///< Clipboard text.

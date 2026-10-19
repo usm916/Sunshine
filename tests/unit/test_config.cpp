@@ -276,3 +276,91 @@ TEST_F(ConfigPersistenceTest, CursorFocusAutomaticModeParses) {
   config::apply_config_for_test("cursor_focus_auto = disabled\n");
   EXPECT_FALSE(config::video.cursor_focus.automatic);
 }
+
+TEST(ConfigDefaultsTest, LowBandwidthIsAdaptiveByDefaultAndRetainsSafeLimits) {
+  EXPECT_EQ(config::video.low_bandwidth.mode, "adaptive");
+  EXPECT_EQ(config::video.low_bandwidth.target_kbps, 0);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_kbps, 100);
+  EXPECT_EQ(config::video.low_bandwidth.maximum_fps, 15);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_fps, 2);
+}
+
+TEST_F(ConfigPersistenceTest, LowBandwidthParsesAndRejectsInvalidModeAndBounds) {
+  const auto original = config::video.low_bandwidth;
+  const auto guard = util::fail_guard([&] {
+    config::video.low_bandwidth = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_low_bandwidth_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  config::apply_config_for_test("low_bandwidth_mode = adaptive\nlow_bandwidth_target_kbps = 250\nlow_bandwidth_minimum_kbps = 64\nlow_bandwidth_maximum_fps = 10\nlow_bandwidth_minimum_fps = 1\n");
+  EXPECT_EQ(config::video.low_bandwidth.mode, "adaptive");
+  EXPECT_EQ(config::video.low_bandwidth.target_kbps, 250);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_kbps, 64);
+  EXPECT_EQ(config::video.low_bandwidth.maximum_fps, 10);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_fps, 1);
+  config::apply_config_for_test("low_bandwidth_mode = unknown\nlow_bandwidth_target_kbps = 31\nlow_bandwidth_minimum_kbps = 1000001\nlow_bandwidth_maximum_fps = 0\nlow_bandwidth_minimum_fps = 121\n");
+  EXPECT_EQ(config::video.low_bandwidth.mode, "adaptive");
+  EXPECT_EQ(config::video.low_bandwidth.target_kbps, 250);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_kbps, 64);
+  EXPECT_EQ(config::video.low_bandwidth.maximum_fps, 10);
+  EXPECT_EQ(config::video.low_bandwidth.minimum_fps, 1);
+  config::apply_config_for_test("low_bandwidth_target_kbps = 0\n");
+  EXPECT_EQ(config::video.low_bandwidth.target_kbps, 0);
+}
+
+TEST_F(ConfigPersistenceTest, CaretFocusParsesAndRejectsOutOfRangeMovementThreshold) {
+  const auto original = config::video.cursor_focus;
+  auto restore = util::fail_guard([&] {
+    config::video.cursor_focus = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_caret_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  EXPECT_TRUE(video::cursor_focus::settings_t {}.follow_text);
+  EXPECT_EQ(video::cursor_focus::settings_t {}.mouse_move_threshold, 6);
+  config::apply_config_for_test("cursor_focus_follow_text = disabled\ncursor_focus_mouse_move_threshold = 12\n");
+  EXPECT_FALSE(config::video.cursor_focus.follow_text);
+  EXPECT_EQ(config::video.cursor_focus.mouse_move_threshold, 12);
+  config::apply_config_for_test("cursor_focus_follow_text = enabled\ncursor_focus_mouse_move_threshold = 0\n");
+  EXPECT_TRUE(config::video.cursor_focus.follow_text);
+  EXPECT_EQ(config::video.cursor_focus.mouse_move_threshold, 12);
+  config::apply_config_for_test("cursor_focus_mouse_move_threshold = 101\n");
+  EXPECT_EQ(config::video.cursor_focus.mouse_move_threshold, 12);
+}
+
+TEST_F(ConfigPersistenceTest, ViewportCropParsesAndRejectsInvalidDeadzoneBounds) {
+  const auto original = config::video.viewport_crop;
+  auto restore = util::fail_guard([&] {
+    config::video.viewport_crop = original;
+  });
+  const auto apps_file = config_file().parent_path() / "sunshine_test_crop_apps.json";
+  ASSERT_EQ(file_handler::write_file(apps_file.string().c_str(), "{}"), 0);
+  config::stream.file_apps = apps_file.string();
+  EXPECT_FALSE(original.enabled);
+  EXPECT_EQ(original.deadzone_width, 20);
+  EXPECT_EQ(original.deadzone_height, 20);
+  EXPECT_FALSE(original.monitor_switch);
+  EXPECT_EQ(original.monitor_switch_delay, 600);
+  config::apply_config_for_test("viewport_crop_monitor_switch = enabled\nviewport_crop_monitor_switch_delay = 800\n");
+  EXPECT_TRUE(config::video.viewport_crop.monitor_switch);
+  EXPECT_EQ(config::video.viewport_crop.monitor_switch_delay, 800);
+  config::apply_config_for_test("viewport_crop_monitor_switch_delay = 99\n");
+  EXPECT_EQ(config::video.viewport_crop.monitor_switch_delay, 800);
+  config::apply_config_for_test("viewport_crop_monitor_switch_delay = 5001\n");
+  EXPECT_EQ(config::video.viewport_crop.monitor_switch_delay, 800);
+  config::apply_config_for_test("viewport_crop_monitor_switch = disabled\nviewport_crop_monitor_switch_delay = 600\n");
+  EXPECT_FALSE(config::video.viewport_crop.monitor_switch);
+  EXPECT_EQ(config::video.viewport_crop.monitor_switch_delay, 600);
+  config::apply_config_for_test("viewport_crop = enabled\nviewport_crop_deadzone_width = 640\nviewport_crop_deadzone_height = 360\n");
+  EXPECT_TRUE(config::video.viewport_crop.enabled);
+  EXPECT_EQ(config::video.viewport_crop.deadzone_width, 640);
+  EXPECT_EQ(config::video.viewport_crop.deadzone_height, 360);
+  config::apply_config_for_test("viewport_crop_deadzone_width = -1\nviewport_crop_deadzone_height = 16385\n");
+  EXPECT_EQ(config::video.viewport_crop.deadzone_width, 640);
+  EXPECT_EQ(config::video.viewport_crop.deadzone_height, 360);
+  config::apply_config_for_test("viewport_crop = disabled\nviewport_crop_deadzone_width = 0\nviewport_crop_deadzone_height = 0\n");
+  EXPECT_FALSE(config::video.viewport_crop.enabled);
+  EXPECT_EQ(config::video.viewport_crop.deadzone_width, 0);
+  EXPECT_EQ(config::video.viewport_crop.deadzone_height, 0);
+}

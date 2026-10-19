@@ -1605,6 +1605,24 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+### cursor_focus_follow_text
+
+<table>
+<tr><td colspan="2">Prefer the text caret after keyboard activity. Mouse movement reaching cursor_focus_mouse_move_threshold, a click or scrolling switches back to the mouse. Missing, stale or off-monitor carets fall back to the mouse. Windows D3D11 only. Restart after changes.</td></tr>
+<tr><td>Default</td><td>enabled</td></tr>
+<tr><td>Options</td><td>enabled, disabled</td></tr>
+<tr><td>Example</td><td>cursor_focus_follow_text = enabled</td></tr>
+</table>
+
+### cursor_focus_mouse_move_threshold
+
+<table>
+<tr><td colspan="2">Physical desktop pixels of cumulative pointer displacement from its typing-time position before changing from caret to mouse. Clicks switch immediately. Requires cursor_focus_follow_text.</td></tr>
+<tr><td>Default</td><td>6</td></tr>
+<tr><td>Range</td><td>1–100</td></tr>
+<tr><td>Example</td><td>cursor_focus_mouse_move_threshold = 6</td></tr>
+</table>
+
 ### cursor_focus_shape
 
 <table>
@@ -3781,4 +3799,117 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
         <td>zerolatency</td>
         <td>good for fast encoding and low-latency streaming</td>
     </tr>
+</table>
+
+### adaptive_bitrate
+
+<table>
+<tr><td>Description</td><td>Enable the optional native NVENC controller based on supported client feedback. Its legacy floor is 3000 kbps; use low_bandwidth_mode for sub-megabit links.</td></tr>
+<tr><td>Default</td><td>@code{}
+disabled
+@endcode</td></tr>
+<tr><td>Example</td><td>@code{}
+adaptive_bitrate = disabled
+@endcode</td></tr>
+</table>
+
+### viewport_crop
+
+<table>
+<tr><td>Description</td><td colspan="2">Send an unscaled viewport when the captured monitor exceeds either client-requested dimension. Windows D3D11 hardware encoding only. The requested stream dimensions stay fixed, with a shorter source axis centered on black padding. Switch between fixed sections following the mouse or text caret using cursor_focus_follow_text and its jitter threshold, independently of background simplification. Each oversized axis has floor(source / visible) + 1 positions evenly spaced from zero to source minus visible, adding one position for exact ratios to preserve overlap. Axes that fit have one position. Preserve the host's physical resolution even with automatic display mode settings. Direct touch and pen contacts freeze panning until release or cancellation. Each connection has independent crop state; Windows input focus remains shared. Reconnect after restarting Sunshine with changed settings. Captures only the selected monitor. Unsupported conversion backends reject crop sessions with an explicit log error.</td></tr>
+<tr><td>Default</td><td colspan="2">disabled</td></tr>
+<tr><td>Options</td><td colspan="2">enabled, disabled</td></tr>
+<tr><td>Example</td><td colspan="2">viewport_crop = enabled</td></tr>
+</table>
+
+### viewport_crop_monitor_switch
+
+<table>
+<tr><td>Description</td><td colspan="2">Windows: with cropping and exactly one active stream, switch to the nearest aligned monitor after the mouse remains in the middle fifth of an outer edge. The activation band is 20 physical pixels; movement over 4 pixels restarts the wait. Direct touch or pen contacts suspend switching. The transport session is retained, but capture and encoding are reinitialized and video may pause. Automatic targets must share the GPU and HDR state. Failed capture, incompatible targets or cursor placement attempts restore the previous display. Disable to keep single-monitor behavior.</td></tr>
+<tr><td>Default</td><td colspan="2">disabled</td></tr>
+<tr><td>Example</td><td colspan="2">viewport_crop_monitor_switch = enabled</td></tr>
+</table>
+
+### viewport_crop_monitor_switch_delay
+
+<table>
+<tr><td>Description</td><td colspan="2">Stationary edge-center dwell duration in milliseconds.</td></tr>
+<tr><td>Default</td><td colspan="2">600</td></tr>
+<tr><td>Range</td><td colspan="2">100–5000</td></tr>
+<tr><td>Example</td><td colspan="2">viewport_crop_monitor_switch_delay = 600</td></tr>
+</table>
+
+### viewport_crop_deadzone_width
+
+<table>
+<tr><td>Description</td><td colspan="2">Width of the left/right crop switch bands in physical pixels. Entering a band switches to the adjacent fixed section. Default 20; zero also selects 20. Each band is capped at half the adjacent overlap (minimum one pixel) to prevent immediate reversal. Monitor edges without a neighboring section do not switch.</td></tr>
+<tr><td>Default</td><td colspan="2">20</td></tr>
+<tr><td>Range</td><td colspan="2">0–16384</td></tr>
+<tr><td>Example</td><td colspan="2">viewport_crop_deadzone_width = 20</td></tr>
+</table>
+
+### viewport_crop_deadzone_height
+
+<table>
+<tr><td>Description</td><td colspan="2">Height of the top/bottom crop switch bands in physical pixels. Entering a band switches to the adjacent fixed section. Default 20; zero also selects 20. Each band is capped at half the adjacent overlap (minimum one pixel) to prevent immediate reversal. Monitor edges without a neighboring section do not switch.</td></tr>
+<tr><td>Default</td><td colspan="2">20</td></tr>
+<tr><td>Range</td><td colspan="2">0–16384</td></tr>
+<tr><td>Example</td><td colspan="2">viewport_crop_deadzone_height = 20</td></tr>
+</table>
+
+### low_bandwidth_mode
+
+<table>
+<tr><td>Description</td><td>Windows native NVENC low-rate policy: disabled, fixed, or adaptive. Preserves the Moonlight wire format. Audio is disabled for the whole low-bandwidth connection. Automatic bitrate, FPS and background changes do not restart Sunshine.</td></tr>
+<tr><td>Default</td><td>@code{}
+disabled
+@endcode</td></tr>
+<tr><td>Example</td><td>@code{}
+low_bandwidth_mode = adaptive
+@endcode</td></tr>
+</table>
+
+### low_bandwidth_target_kbps
+
+<table>
+<tr><td>Description</td><td colspan="2">Optional total video-path ceiling including FEC and estimated packet overhead. Zero follows the client-requested bitrate. A positive cap limits the request and global max_bitrate may impose a lower ceiling. This is an encoder/frame admission budget, not a strict packet shaper. Automatic background detail uses this effective budget, so a 4 Mbps request with the default zero cap starts without background simplification.</td></tr>
+<tr><td>Default</td><td colspan="2">0</td></tr>
+<tr><td>Options</td><td colspan="2">0, or 32–1000000</td></tr>
+<tr><td>Example</td><td colspan="2">low_bandwidth_target_kbps = 0</td></tr>
+</table>
+
+### low_bandwidth_minimum_kbps
+
+<table>
+<tr><td>Description</td><td>Minimum adaptive video-path budget in kbps (32-1000000), bounded by the session ceiling. Does not impose the 3 Mbps legacy controller floor.</td></tr>
+<tr><td>Default</td><td>@code{}
+100
+@endcode</td></tr>
+<tr><td>Example</td><td>@code{}
+low_bandwidth_minimum_kbps = 100
+@endcode</td></tr>
+</table>
+
+### low_bandwidth_maximum_fps
+
+<table>
+<tr><td>Description</td><td>Maximum encoded FPS (1-120), bounded by the client request. The actual profile may use fewer frames to account for minimum FEC cost.</td></tr>
+<tr><td>Default</td><td>@code{}
+15
+@endcode</td></tr>
+<tr><td>Example</td><td>@code{}
+low_bandwidth_maximum_fps = 15
+@endcode</td></tr>
+</table>
+
+### low_bandwidth_minimum_fps
+
+<table>
+<tr><td>Description</td><td>Minimum encoded FPS (1-120), bounded by the effective maximum. Frames are admitted before encoding; the negotiated client FPS and frame-number continuity are preserved.</td></tr>
+<tr><td>Default</td><td>@code{}
+2
+@endcode</td></tr>
+<tr><td>Example</td><td>@code{}
+low_bandwidth_minimum_fps = 2
+@endcode</td></tr>
 </table>

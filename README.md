@@ -1,3 +1,5 @@
+> **Sunshine Custom (`usm916`, `custom/main`)**: [custom features](README.custom.md) · [Mac development and cross-PC handoff](docs/custom/mac-development.md). This fork includes Windows custom features; macOS porting status is documented separately.
+
 <div align="center">
   <img
     src="sunshine.svg"

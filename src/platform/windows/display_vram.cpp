@@ -21,13 +21,16 @@ extern "C" {
 // local includes
 #include "cursor_focus_background.h"
 #include "display.h"
+#include "focus_anchor.h"
 #include "misc.h"
 #include "src/config.h"
 #include "src/logging.h"
 #include "src/nvenc/nvenc_config.h"
 #include "src/nvenc/nvenc_dynamic_factory.h"
 #include "src/video.h"
+#include "src/video_cursor_focus_diagnostics.h"
 #include "utf_utils.h"
+#include "viewport_crop.h"
 
 #if !defined(SUNSHINE_SHADERS_DIR)  // for testing this needs to be defined in cmake as we don't do an install
   /**
@@ -501,22 +504,6 @@ namespace platf::dxgi {
 
       auto &img = (img_d3d_t &) img_base;
       if (!img.blank) {
-        ::video::cursor_focus::shader_constants_t focus_constants {};
-        if (cursor_focus_buffer) {
-          POINT cursor {};
-          const bool cursor_known = GetPhysicalCursorPos(&cursor);
-          const auto &viewport = out_Y_or_YUV_viewports[0];
-          const ::video::cursor_focus::geometry_t geometry {
-            display->offset_x,
-            display->offset_y,
-            display->width,
-            display->height,
-            viewport.Width,
-            viewport.Height,
-            display->display_rotation == DXGI_MODE_ROTATION_UNSPECIFIED ? 0 : display->display_rotation - 1
-          };
-          focus_constants = ::video::cursor_focus::make_constants(focus_settings, geometry, cursor.x, cursor.y, cursor_known);
-        }
         auto &img_ctx = img_ctx_map[img.id];
 
         // Open the shared capture texture with our ID3D11Device
@@ -529,6 +516,51 @@ namespace platf::dxgi {
         if (status != S_OK) {
           BOOST_LOG(error) << "Failed to acquire encoder mutex [0x"sv << util::hex(status).to_string_view() << ']';
           return -1;
+        }
+
+        // Lock only after acquiring the shared capture image, so input never waits on its mutex.
+        std::unique_lock<std::mutex> crop_lock;
+        if (viewport_crop) {
+          crop_lock = std::unique_lock(viewport_crop->mutex);
+        }
+        POINT cursor {};
+        const bool cursor_known = GetPhysicalCursorPos(&cursor);
+        const int left = display->offset_x + GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const int top = display->offset_y + GetSystemMetrics(SM_YVIRTUALSCREEN);
+        const int rotation = display->display_rotation == DXGI_MODE_ROTATION_UNSPECIFIED ? 0 : display->display_rotation - 1;
+        const bool follow_text = focus_settings.follow_text && (focus_settings.enabled || viewport_crop);
+        if (!follow_text) {
+          focus_anchor_service.reset();
+        } else if (!focus_anchor_service) {
+          focus_anchor_service = acquire_focus_anchor(focus_settings.mouse_move_threshold);
+        }
+        const auto anchor = ::video::focus_anchor::select(
+          cursor_known ? std::optional<::video::focus_anchor::point_t> {{cursor.x, cursor.y}} : std::nullopt,
+          follow_text && focus_anchor_service ? focus_anchor_service->caret() : std::nullopt,
+          left,
+          top,
+          display->width,
+          display->height
+        );
+        ::video::viewport::frame_t crop;
+        if (viewport_crop) {
+          crop = ::video::viewport::track(viewport_crop->frame, viewport_crop->settings, display->width, display->height, output_width, output_height, anchor ? std::optional<std::pair<int, int>> {{anchor->x - left, anchor->y - top}} : std::nullopt, !viewport_crop->contacts.empty());
+        }
+        const auto crop_constants = ::video::viewport::shader_constants(crop, rotation);
+        device_ctx->UpdateSubresource(viewport_crop_buffer.get(), 0, nullptr, &crop_constants, 0, 0);
+        ::video::cursor_focus::shader_constants_t focus_constants {};
+        if (cursor_focus_buffer) {
+          const auto &viewport = out_Y_or_YUV_viewports[0];
+          const ::video::cursor_focus::geometry_t geometry {
+            left,
+            top,
+            display->width,
+            display->height,
+            crop.active ? static_cast<float>(display->width) : viewport.Width,
+            crop.active ? static_cast<float>(display->height) : viewport.Height,
+            rotation
+          };
+          focus_constants = ::video::cursor_focus::make_constants(focus_settings, geometry, anchor ? anchor->x : 0, anchor ? anchor->y : 0, anchor.has_value());
         }
 
         if (cursor_focus_buffer) {
@@ -545,6 +577,14 @@ namespace platf::dxgi {
             cursor_focus_background.reset();
           }
           device_ctx->UpdateSubresource(cursor_focus_buffer.get(), 0, nullptr, &focus_constants, 0, 0);
+        }
+
+        const auto effective_focus = ::video::cursor_focus::render_state(focus_settings.enabled, !!cursor_focus_buffer, focus_constants.enabled != 0);
+        if (focus_diagnostics.should_log(effective_focus, std::chrono::steady_clock::now())) {
+          BOOST_LOG(info) << "cursor_focus_render requested=" << focus_settings.enabled
+                          << " applied=" << (effective_focus == ::video::cursor_focus::render_state_e::applied)
+                          << " reason=" << static_cast<int>(effective_focus)
+                          << " background_scale=" << focus_settings.background_scale << " history=" << (focus_constants.history != 0);
         }
 
         auto draw = [&](auto &input, auto &y_or_yuv_viewports, auto &uv_viewport) {
@@ -583,6 +623,10 @@ namespace platf::dxgi {
         auto *background_view = focus_constants.history ? cursor_focus_background.view() : nullptr;
         device_ctx->PSSetShaderResources(1, 1, &background_view);
         draw(img_ctx.encoder_input_res, out_Y_or_YUV_viewports, out_UV_viewport);
+
+        if (viewport_crop) {
+          viewport_crop->frame = crop;
+        }
 
         // Release encoder mutex to allow capture code to reuse this image
         img_ctx.encoder_mutex->ReleaseSync(0);
@@ -652,7 +696,16 @@ namespace platf::dxgi {
     }
 #endif
 
-      const bool downscaling = display->width > width || display->height > height;
+      output_width = width;
+      output_height = height;
+      const auto initial_crop = ::video::viewport::track({}, viewport_crop ? viewport_crop->settings : ::video::viewport::settings_t {}, display->width, display->height, width, height, std::nullopt);
+      const bool downscaling = !initial_crop.active && (display->width > width || display->height > height);
+      if (viewport_crop && !initial_crop.active) {
+        BOOST_LOG(info) << "Viewport crop bypass: source=" << display->width << "x" << display->height << " requested=" << width << "x" << height << " reason=source_not_larger";
+      }
+      if (initial_crop.active) {
+        BOOST_LOG(info) << "Viewport crop: " << display->width << "x" << display->height << " -> " << width << "x" << height << ", native pixels; sections " << ::video::viewport::section_count(display->width, width) << "x" << ::video::viewport::section_count(display->height, height) << "; edge switch margins " << viewport_crop->settings.deadzone_width << "x" << viewport_crop->settings.deadzone_height << " pixels (0 = 20)";
+      }
 
       const auto fp16_transfer = select_fp16_transfer(format, display->is_hdr(), config::video.fp16_sdr_gamma_encoded);
       if (fp16_transfer == fp16_transfer_e::gamma_encoded) {
@@ -736,11 +789,11 @@ namespace platf::dxgi {
       auto out_width = width;
       auto out_height = height;
 
-      float in_width = display->width;
-      float in_height = display->height;
+      float in_width = initial_crop.active ? initial_crop.width : display->width;
+      float in_height = initial_crop.active ? initial_crop.height : display->height;
 
       // Ensure aspect ratio is maintained
-      auto scalar = std::fminf(out_width / in_width, out_height / in_height);
+      auto scalar = initial_crop.active ? 1.0f : std::fminf(out_width / in_width, out_height / in_height);
       auto out_width_f = in_width * scalar;
       auto out_height_f = in_height * scalar;
 
@@ -864,9 +917,10 @@ namespace platf::dxgi {
      * @param display Display object or identifier associated with the operation.
      * @param adapter_p Adapter p.
      * @param pix_fmt Sunshine pixel format to convert or allocate for.
+     * @param device_override Optional device for controlled conversion tests; null creates a hardware device.
      * @return 0 on success; nonzero or negative platform status on failure.
      */
-    int init(std::shared_ptr<platf::display_t> display, adapter_t::pointer adapter_p, pix_fmt_e pix_fmt) {
+    int init(std::shared_ptr<platf::display_t> display, adapter_t::pointer adapter_p, pix_fmt_e pix_fmt, ID3D11Device *device_override = nullptr) {
       switch (pix_fmt) {
         case pix_fmt_e::nv12:
           format = DXGI_FORMAT_NV12;
@@ -903,18 +957,25 @@ namespace platf::dxgi {
         D3D_FEATURE_LEVEL_9_1
       };
 
-      HRESULT status = D3D11CreateDevice(
-        adapter_p,
-        D3D_DRIVER_TYPE_UNKNOWN,
-        nullptr,
-        D3D11_CREATE_DEVICE_FLAGS | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-        featureLevels,
-        sizeof(featureLevels) / sizeof(D3D_FEATURE_LEVEL),
-        D3D11_SDK_VERSION,
-        &device,
-        nullptr,
-        &device_ctx
-      );
+      HRESULT status = S_OK;
+      if (device_override) {
+        device_override->AddRef();
+        device.reset(device_override);
+        device->GetImmediateContext(&device_ctx);
+      } else {
+        status = D3D11CreateDevice(
+          adapter_p,
+          D3D_DRIVER_TYPE_UNKNOWN,
+          nullptr,
+          D3D11_CREATE_DEVICE_FLAGS | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+          featureLevels,
+          sizeof(featureLevels) / sizeof(D3D_FEATURE_LEVEL),
+          D3D11_SDK_VERSION,
+          &device,
+          nullptr,
+          &device_ctx
+        );
+      }
 
       if (FAILED(status)) {
         BOOST_LOG(error) << "Failed to create encoder D3D11 device [0x"sv << util::hex(status).to_string_view() << ']';
@@ -968,6 +1029,12 @@ namespace platf::dxgi {
         }
       }
       device_ctx->PSSetConstantBuffers(2, 1, &cursor_focus_buffer);
+
+      if (FAILED(create_viewport_crop_buffer(device.get(), viewport_crop_buffer))) {
+        BOOST_LOG(error) << "Failed to create viewport crop constant buffer";
+        return -1;
+      }
+      device_ctx->PSSetConstantBuffers(3, 1, &viewport_crop_buffer);
 
       blend_disable = make_blend(device.get(), false, false);
       if (!blend_disable) {
@@ -1117,9 +1184,15 @@ namespace platf::dxgi {
 
     buf_t subsample_offset;  ///< Subsample offset.
     buf_t color_matrix;  ///< Color matrix.
+    std::shared_ptr<::video::viewport::state_t> viewport_crop;  ///< Per-connection native crop and input synchronization.
+    buf_t viewport_crop_buffer;  ///< Rotated crop sampling constants.
+    int output_width = 0;  ///< Encoded width fixed for this session.
+    int output_height = 0;  ///< Encoded height fixed for this session.
     ::video::cursor_focus::settings_t focus_settings = config::video.cursor_focus;  ///< Immutable session focus settings.
     buf_t cursor_focus_buffer;  ///< Mutable cursor-area parameters; null preserves the original sampling path.
+    ::video::cursor_focus::render_gate_t focus_diagnostics;  ///< Coalesced effective-shader transitions.
     cursor_focus_background_t cursor_focus_background;  ///< Per-session retained background and refresh timing.
+    std::shared_ptr<focus_anchor_service_t> focus_anchor_service;  ///< Shared asynchronous caret and activity observer.
 
     blend_t blend_disable;  ///< Blend disable.
     sampler_state_t sampler_linear;  ///< Sampler linear.
@@ -1187,8 +1260,18 @@ namespace platf::dxgi {
     }
 
     /**
-     * @brief Apply cursor-focus settings only to this encoder's conversion resources.
-     * @param settings Focus geometry and background preset selected for this connection.
+     * @brief Select native-pixel viewport tracking for this D3D11 connection.
+     * @param state Shared viewport and direct-input state.
+     * @return True because D3D11 conversion implements crop sampling.
+     */
+    bool set_viewport_crop(const std::shared_ptr<::video::viewport::state_t> &state) override {
+      base.viewport_crop = state;
+      return true;
+    }
+
+    /**
+     * @brief Update the detail-preservation policy for this conversion device.
+     * @param settings Per-session sharp region and background policy.
      */
     void set_cursor_focus(const ::video::cursor_focus::settings_t &settings) override {
       base.focus_settings = settings;
@@ -1362,8 +1445,18 @@ namespace platf::dxgi {
     }
 
     /**
-     * @brief Apply cursor-focus settings only to this encoder's conversion resources.
-     * @param settings Focus geometry and background preset selected for this connection.
+     * @brief Select native-pixel viewport tracking for this D3D11 connection.
+     * @param state Shared viewport and direct-input state.
+     * @return True because D3D11 conversion implements crop sampling.
+     */
+    bool set_viewport_crop(const std::shared_ptr<::video::viewport::state_t> &state) override {
+      base.viewport_crop = state;
+      return true;
+    }
+
+    /**
+     * @brief Update the detail-preservation policy for this conversion device.
+     * @param settings Per-session sharp region and background policy.
      */
     void set_cursor_focus(const ::video::cursor_focus::settings_t &settings) override {
       base.focus_settings = settings;
@@ -2267,4 +2360,120 @@ namespace platf::dxgi {
 
     return 0;
   }
+#ifdef SUNSHINE_TESTS
+  namespace testing {
+    /**
+     * @brief Synthetic capture metadata with no monitor or desktop interaction.
+     */
+    class synthetic_crop_display_t: public display_ddup_vram_t {
+    public:
+      /**
+       * @brief Keep the synthetic image in SDR. @return False.
+       */
+      bool is_hdr() override {
+        return false;
+      }
+    };
+
+    std::vector<std::uint8_t> convert_viewport_frames(const ::video::viewport::frame_t &first, const ::video::viewport::frame_t &second) {
+      if (dxgi::init() != 0) {
+        return {};
+      }
+      device_t warp;
+      device_ctx_t warp_context;
+      if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &warp, nullptr, &warp_context))) {
+        return {};
+      }
+      dxgi_t dxgi;
+      adapter_t adapter;
+      IDXGIAdapter *basic_adapter = nullptr;
+      if (FAILED(warp->QueryInterface(IID_IDXGIDevice, reinterpret_cast<void **>(&dxgi))) || FAILED(dxgi->GetAdapter(&basic_adapter))) {
+        return {};
+      }
+      auto release_adapter = util::fail_guard([&] {
+        basic_adapter->Release();
+      });
+      if (FAILED(basic_adapter->QueryInterface(IID_IDXGIAdapter1, reinterpret_cast<void **>(&adapter)))) {
+        return {};
+      }
+      auto display = std::make_shared<synthetic_crop_display_t>();
+      display->width = display->width_before_rotation = first.source_width;
+      display->height = display->height_before_rotation = first.source_height;
+      display->capture_format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      display->display_rotation = DXGI_MODE_ROTATION_IDENTITY;
+      display->next_image_id = 0;
+      d3d_base_encode_device base;
+      if (base.init(display, adapter.get(), pix_fmt_e::ayuv, warp.get()) != 0) {
+        return {};
+      }
+      base.focus_settings.enabled = false;
+      base.focus_settings.follow_text = false;
+      base.viewport_crop = std::make_shared<::video::viewport::state_t>();
+      base.viewport_crop->settings.enabled = true;
+      base.viewport_crop->frame = first;
+      base.viewport_crop->contacts.insert(1);
+      D3D11_TEXTURE2D_DESC desc {
+        .Width = static_cast<UINT>(first.output_width),
+        .Height = static_cast<UINT>(first.output_height),
+        .MipLevels = 1,
+        .ArraySize = 1,
+        .Format = DXGI_FORMAT_R8G8B8A8_UINT,
+        .SampleDesc = {1, 0},
+        .Usage = D3D11_USAGE_DEFAULT,
+        .BindFlags = D3D11_BIND_RENDER_TARGET
+      };
+      texture2d_t output;
+      if (FAILED(base.device->CreateTexture2D(&desc, nullptr, &output)) || base.init_output(output.get(), first.output_width, first.output_height) != 0) {
+        return {};
+      }
+      base.apply_colorspace({::video::colorspace_e::rec601, false, 8});
+      base.device->AddRef();
+      display->device.reset(base.device.get());
+      auto image = display->alloc_img();
+      if (!image || display->complete_img(image.get(), false) != 0) {
+        return {};
+      }
+      auto &captured = static_cast<img_d3d_t &>(*image);
+      std::vector<std::uint8_t> source(first.source_width * first.source_height * 4);
+      for (int y = 0; y < first.source_height; ++y) {
+        for (int x = 0; x < first.source_width; ++x) {
+          const auto offset = (y * first.source_width + x) * 4;
+          source[offset] = source[offset + 1] = source[offset + 2] = static_cast<std::uint8_t>(x + y);
+          source[offset + 3] = 255;
+        }
+      }
+      if (captured.capture_mutex->AcquireSync(0, 1000) != S_OK) {
+        return {};
+      }
+      base.device_ctx->UpdateSubresource(captured.capture_texture.get(), 0, nullptr, source.data(), first.source_width * 4, 0);
+      captured.capture_mutex->ReleaseSync(0);
+      captured.blank = false;
+      desc.Usage = D3D11_USAGE_STAGING;
+      desc.BindFlags = 0;
+      desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+      texture2d_t staging;
+      if (FAILED(base.device->CreateTexture2D(&desc, nullptr, &staging))) {
+        return {};
+      }
+      std::vector<std::uint8_t> result;
+      for (const auto &frame : {first, second}) {
+        base.viewport_crop->frame = frame;
+        if (base.convert(captured) != 0) {
+          return {};
+        }
+        base.device_ctx->CopyResource(staging.get(), output.get());
+        D3D11_MAPPED_SUBRESOURCE mapped {};
+        if (FAILED(base.device_ctx->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+          return {};
+        }
+        for (int y = 0; y < frame.output_height; ++y) {
+          auto row = static_cast<const std::uint8_t *>(mapped.pData) + y * mapped.RowPitch;
+          result.insert(result.end(), row, row + frame.output_width * 4);
+        }
+        base.device_ctx->Unmap(staging.get(), 0);
+      }
+      return result;
+    }
+  }  // namespace testing
+#endif
 }  // namespace platf::dxgi

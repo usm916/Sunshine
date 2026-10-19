@@ -35,8 +35,10 @@ extern "C" {
 #include "platform/common.h"
 #include "sync.h"
 #include "video.h"
+#include "video_monitor_switch.h"
 
 #ifdef _WIN32
+  #include "platform/windows/monitor_switch.h"
 extern "C" {
   #include <libavutil/hwcontext_d3d11va.h>
 }
@@ -45,6 +47,91 @@ extern "C" {
 using namespace std::literals;
 
 namespace video {
+
+  std::string_view bitrate_reconfigure_status_name(bitrate_reconfigure_status_e status) {
+    using enum bitrate_reconfigure_status_e;
+
+    switch (status) {
+      case applied:
+        return "applied";
+      case unchanged:
+        return "unchanged";
+      case invalid:
+        return "invalid";
+      case unsupported:
+        return "unsupported";
+      case failed:
+        return "failed";
+    }
+
+    return "unknown";
+  }
+
+  std::optional<bitrate_reconfigure_result_t> apply_pending_bitrate_reconfiguration(
+    const safe::mail_raw_t::event_t<bitrate_reconfigure_request_t> &bitrate_events,
+    encode_session_t &session,
+    config_t &config
+  ) {
+    auto request = bitrate_events->try_pop();
+    if (!request) {
+      return std::nullopt;
+    }
+
+    auto result = session.reconfigure_bitrate(request->target_kbps);
+    BOOST_LOG(info)
+      << "video_bitrate_reconfigure"
+      << " old_target_kbps=" << result.old_target_kbps
+      << " requested_target_kbps=" << result.requested_target_kbps
+      << " effective_target_kbps=" << result.effective_target_kbps
+      << " result=" << bitrate_reconfigure_status_name(result.status);
+
+    if (
+      result.status == bitrate_reconfigure_status_e::applied ||
+      result.status == bitrate_reconfigure_status_e::unchanged
+    ) {
+      config.bitrate = static_cast<int>(result.effective_target_kbps);
+    }
+    return result;
+  }
+
+  void configure_session_audio(audio::config_t &audio_config, config_t &video_config, bool stream_enabled, int packet_bytes, int minimum_parity, int fec_percent) {
+    const bool adaptive_audio = video_config.low_bandwidth.mode != "disabled";
+    audio_config.enabled = stream_enabled && (adaptive_audio || !video_config.cursor_focus.enabled);
+    audio_config.runtime.reset();
+    video_config.audio_runtime.reset();
+    video_config.audio_reserve_kbps = 0;
+    if (adaptive_audio) {
+      video_config.audio_reserve_kbps = audio::transport_reservation_kbps(audio_config);
+      video_config.low_profile = low_bandwidth::make_profile(video_config.low_bandwidth, video_config.low_profile.wire_kbps, video_config.framerate, packet_bytes, minimum_parity, fec_percent, video_config.audio_reserve_kbps);
+      audio_config.runtime = video_config.audio_runtime = std::make_shared<audio::runtime_t>();
+      video_config.audio_runtime->set_enabled(video_config.low_profile.audio_enabled);
+    }
+  }
+
+  bool apply_low_bandwidth_profile(encode_session_t &session, config_t &config, const low_bandwidth::profile_t &profile) {
+    if (config.audio_runtime && !profile.audio_enabled) {
+      config.audio_runtime->set_enabled(false);
+    }
+    const auto result = session.reconfigure_stream(profile.video_kbps, profile.fps);
+    const bool applied = result.status == bitrate_reconfigure_status_e::applied || result.status == bitrate_reconfigure_status_e::unchanged;
+    config.low_telemetry->reconfigure_status.store(applied ? 1 : -1, std::memory_order_relaxed);
+    if (applied) {
+      config.low_profile = profile;
+      config.bitrate = static_cast<int>(result.effective_target_kbps);
+      config.cursor_focus = low_bandwidth::focus_settings(config.focus_template, profile);
+      session.set_cursor_focus(config.cursor_focus);
+      if (config.audio_runtime) {
+        config.audio_runtime->set_enabled(profile.audio_enabled);
+      }
+    }
+    BOOST_LOG(info) << "low_bandwidth_apply wire_kbps=" << profile.wire_kbps
+                    << " video_kbps=" << profile.video_kbps << " fps=" << profile.fps
+                    << " result=" << bitrate_reconfigure_status_name(result.status)
+                    << " focus_enabled=" << config.cursor_focus.enabled << " background_scale=" << config.cursor_focus.background_scale
+                    << " background_loop_ms=" << config.cursor_focus.background_loop_ms << " background_loop_frames=" << config.cursor_focus.background_loop_frames
+                    << " audio_enabled=" << (config.audio_runtime && (config.audio_runtime->generation.load(std::memory_order_acquire) & 1));
+    return applied;
+  }
 
   namespace {
     /**
@@ -565,6 +652,42 @@ namespace video {
         return -1;
       }
       return device->convert(img);
+    }
+
+    /**
+     * @brief Reconfigure bitrate on the active native NVENC encoder.
+     *
+     * @param target_kbps Requested bitrate in kilobits per second.
+     * @return Detailed result of the NVENC request.
+     */
+    /**
+     * @brief Apply paired codec budget and frame rate on the encoder thread.
+     * @param target_kbps Codec bitrate.
+     * @param fps Encoder frequency.
+     * @return Native reconfiguration result.
+     */
+    bitrate_reconfigure_result_t reconfigure_stream(std::uint32_t target_kbps, std::uint32_t fps) override {
+      return device->nvenc->reconfigure_stream(target_kbps, fps);
+    }
+
+    /**
+     * @brief Update GPU focus/background settings before conversion.
+     * @param settings Current session focus settings.
+     */
+    void set_cursor_focus(const cursor_focus::settings_t &settings) override {
+      device->set_cursor_focus(settings);
+    }
+
+    bitrate_reconfigure_result_t reconfigure_bitrate(std::uint32_t target_kbps) override {
+      if (!device || !device->nvenc) {
+        return {
+          bitrate_reconfigure_status_e::failed,
+          0,
+          target_kbps,
+          0,
+        };
+      }
+      return device->nvenc->reconfigure_bitrate(target_kbps);
     }
 
     /**
@@ -1552,6 +1675,74 @@ namespace video {
   }
 
   /**
+   * @brief Automatic monitor request kept across capture and encoder reinitialization.
+   */
+  class monitor_switch_context_t {
+  public:
+    /**
+     * @brief Observe a single crop session without changing capture resources in a callback.
+     * @param current Currently captured monitor name.
+     * @param viewport Shared crop and direct-contact state.
+     * @param sessions Active sessions sharing capture.
+     * @param display Current capture object supplying the original GPU and HDR identity.
+     */
+    void poll(const std::string &current, const std::shared_ptr<viewport::state_t> &viewport, std::size_t sessions, platf::display_t *display) {
+#ifdef _WIN32
+      requested = controller.poll(current, viewport, sessions);
+      if (requested) {
+        source_key = platf::dxgi::monitor_capture_key(display);
+      }
+#endif
+    }
+
+    /**
+     * @brief Reopen capture at a requested output and restore the previous one on failure.
+     * @param disp Capture object released and recreated by the existing capture loop.
+     * @param type Encoder memory backend.
+     * @param names Refreshed capturable output names.
+     * @param index Current output index, updated only after the requested transition.
+     * @param config Existing client configuration; output size and transport remain unchanged.
+     */
+    void reset(std::shared_ptr<platf::display_t> &disp, platf::mem_type_e type, const std::vector<std::string> &names, int &index, const config_t &config) {
+      if (!requested) {
+        reset_display(disp, type, names[index], config);
+        return;
+      }
+      const auto started = std::chrono::steady_clock::now();
+      const auto target = requested->name;
+      const auto result = monitor_switch::transition(*requested, names[index], names, [&](const std::string &name) {
+        reset_display(disp, type, name, config);
+#ifdef _WIN32
+        if (disp && name == target && !monitor_switch::compatible(source_key, platf::dxgi::monitor_capture_key(disp.get()))) {
+          BOOST_LOG(warning) << "Automatic monitor change requires the same GPU and HDR state; restoring the previous output";
+          return false;
+        }
+#endif
+        return static_cast<bool>(disp);
+      },
+                                                     [](std::pair<int, int> point) {
+#ifdef _WIN32
+                                                       return platf::dxgi::place_monitor_cursor(point);
+#else
+                                                       return false;
+#endif
+                                                     });
+      index = static_cast<int>(std::find(names.begin(), names.end(), result.selected) - names.begin());
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+      BOOST_LOG(info) << "Monitor edge dwell: target=" << target << ", selected=" << result.selected << ", switched=" << result.switched << ", capture_ready=" << result.ready << ", capture_reopen_ms=" << elapsed;
+      requested.reset();
+    }
+
+    std::optional<monitor_switch::request_t> requested;  ///< Deferred request, never applied inside frame conversion.
+
+  private:
+#ifdef _WIN32
+    platf::dxgi::monitor_switch_t controller;  ///< CPU-only topology and pointer polling.
+    std::optional<monitor_switch::capture_key_t> source_key;  ///< Original capture adapter and HDR state.
+#endif
+  };
+
+  /**
    * @brief Run the shared display capture thread for asynchronous encoding.
    *
    * @param capture_ctx_queue Capture context queue.
@@ -1580,6 +1771,7 @@ namespace video {
     });
 
     auto switch_display_event = mail::man->event<int>(mail::switch_display);
+    monitor_switch_context_t monitor_switch;
 
     // Wait for the initial capture context or a request to stop the queue
     auto initial_capture_ctx = capture_ctx_queue->pop();
@@ -1726,7 +1918,10 @@ namespace video {
           capture_ctxs.emplace_back(std::move(*capture_ctx_queue->pop()));
         }
 
-        if (switch_display_event->peek()) {
+        if (!switch_display_event->peek()) {
+          monitor_switch.poll(display_names[display_p], capture_ctxs.empty() ? nullptr : capture_ctxs.front().config.viewport_crop, capture_ctxs.size(), disp.get());
+        }
+        if (switch_display_event->peek() || monitor_switch.requested) {
           artificial_reinit = true;
           return false;
         }
@@ -1786,10 +1981,11 @@ namespace video {
               // Process any pending display switch with the new list of displays
               if (switch_display_event->peek()) {
                 display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+                monitor_switch.requested.reset();
               }
 
-              // reset_display() will sleep between retries
-              reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+              // Reuse the existing reinitialization path without restarting transport.
+              monitor_switch.reset(disp, encoder.platform_formats->dev_type, display_names, display_p, capture_ctxs.front().config);
               if (disp) {
                 break;
               }
@@ -2356,7 +2552,12 @@ namespace video {
    * @return Constructed NVENC encode session object.
    */
   std::unique_ptr<nvenc_encode_session_t> make_nvenc_encode_session(const config_t &client_config, std::unique_ptr<platf::nvenc_encode_device_t> encode_device) {
-    if (!encode_device->init_encoder(client_config, encode_device->colorspace)) {
+    auto encoder_config = client_config;
+    if (client_config.low_bandwidth.mode != "disabled") {
+      encoder_config.framerate = client_config.low_profile.fps;
+      encoder_config.framerateX100 = 0;
+    }
+    if (!encode_device->init_encoder(encoder_config, encode_device->colorspace)) {
       return nullptr;
     }
 
@@ -2392,7 +2593,7 @@ namespace video {
    * @param frame_nr Frame counter updated as frames are encoded.
    * @param mail Session mail bus.
    * @param images Captured image event source.
-   * @param config Video configuration.
+   * @param config Mutable video configuration retained across encoder reinitialization.
    * @param disp Display being encoded.
    * @param encode_device Platform encode device.
    * @param reinit_event Signal raised while the encoder/display is reinitializing.
@@ -2403,7 +2604,7 @@ namespace video {
     int &frame_nr,  // Store progress of the frame number
     safe::mail_t mail,
     img_event_t images,
-    config_t config,
+    config_t &config,
     std::shared_ptr<platf::display_t> disp,
     std::unique_ptr<platf::encode_device_t> encode_device,
     safe::signal_t &reinit_event,
@@ -2433,7 +2634,7 @@ namespace video {
     });
 
     // set max frame time based on client-requested target framerate.
-    double minimum_fps_target = (config::video.minimum_fps_target > 0.0) ? config::video.minimum_fps_target : (config.framerate / 2);
+    double minimum_fps_target = config.low_bandwidth.mode != "disabled" ? std::max(1, config.low_profile.fps) : ((config::video.minimum_fps_target > 0.0) ? config::video.minimum_fps_target : (config.framerate / 2));
     std::chrono::duration<double, std::milli> max_frametime {1000.0 / minimum_fps_target};
     BOOST_LOG(info) << "Minimum FPS target set to ~"sv << minimum_fps_target << "fps ("sv << max_frametime.count() << "ms)"sv;
 
@@ -2441,6 +2642,8 @@ namespace video {
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
     auto idr_events = mail->event<bool>(mail::idr);
     auto invalidate_ref_frames_events = mail->event<std::pair<int64_t, int64_t>>(mail::invalidate_ref_frames);
+    auto bitrate_events = mail->event<bitrate_reconfigure_request_t>(mail::video_bitrate);
+    auto bitrate_result_events = mail->event<bitrate_reconfigure_result_t>(mail::video_bitrate_result);
 
     {
       // Load a dummy image into the AVFrame to ensure we have something to encode
@@ -2453,9 +2656,26 @@ namespace video {
       }
     }
 
+    auto low_events = mail->event<low_bandwidth::profile_t>(mail::low_bandwidth);
+    low_bandwidth::frame_gate_t low_gate;
+    const bool low_enabled = config.low_bandwidth.mode != "disabled";
     std::shared_ptr<platf::img_t> cursor_focus_image;  ///< Latest capture retained only for cursor focus refreshes on static scenes.
 
     while (true) {
+      if (low_enabled) {
+        if (auto profile = low_events->try_pop()) {
+          apply_low_bandwidth_profile(*session, config, *profile);
+          max_frametime = std::chrono::duration<double, std::milli>(1000.0 / std::max(1, config.low_profile.fps));
+        }
+        if (shutdown_event->peek() || !images->running()) {
+          break;
+        }
+        const auto wait = low_gate.wait(std::chrono::steady_clock::now());
+        if (wait > std::chrono::steady_clock::duration::zero()) {
+          std::this_thread::sleep_for(std::min(wait, std::chrono::duration_cast<std::chrono::steady_clock::duration>(20ms)));
+          continue;
+        }
+      }
       bool requested_idr_frame = false;
 
       while (invalidate_ref_frames_events->peek()) {
@@ -2477,13 +2697,13 @@ namespace video {
 
       // Encode at a minimum FPS to avoid image quality issues with static content
       if (!requested_idr_frame || images->peek()) {
-        if (auto img = images->pop(max_frametime)) {
+        if (auto img = images->pop(low_enabled ? decltype(max_frametime)::zero() : max_frametime)) {
           frame_timestamp = img->frame_timestamp;
           if (session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
             return;
           }
-          if (config.cursor_focus.enabled) {
+          if (config.cursor_focus.enabled || config.viewport_crop) {
             cursor_focus_image = std::move(img);
           }
         } else if (!images->running()) {
@@ -2508,12 +2728,19 @@ namespace video {
         break;
       }
 
+      if (auto result = apply_pending_bitrate_reconfiguration(bitrate_events, *session, config)) {
+        bitrate_result_events->raise(*result);
+      }
+
       if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
         BOOST_LOG(error) << "Could not encode video packet"sv;
         return;
       }
 
       session->request_normal_frame();
+      if (low_enabled) {
+        low_gate.submitted(std::chrono::steady_clock::now(), config.low_profile, config.low_telemetry->last_frame_bytes.load(std::memory_order_relaxed));
+      }
 
       // While streaming check to see if the mouse is present and enable Mouse Keys to force the cursor to appear
       // This is useful for KVM switch scenarios where mouse may disappear during streaming
@@ -2573,7 +2800,8 @@ namespace video {
       1.0f / scalar,
       scalar_tpcoords,
       display_env_logical_width,
-      display_env_logical_height
+      display_env_logical_height,
+      config.viewport_crop
     };
   }
 
@@ -2630,6 +2858,10 @@ namespace video {
     }
 
     if (result) {
+      if (!result->set_viewport_crop(config.viewport_crop)) {
+        BOOST_LOG(error) << "Viewport crop requires a Windows D3D11 hardware encoder";
+        return {};
+      }
       result->set_cursor_focus(config.cursor_focus);
       result->colorspace = colorspace;
     }
@@ -2693,13 +2925,15 @@ namespace video {
    * @param encode_session_ctx_queue Pending synchronized session context queue.
    * @param display_names Cached display names.
    * @param display_p Active display index.
+   * @param monitor_switch Persistent optional edge-dwell controller.
    * @return Encoder loop result.
    */
   encode_e encode_run_sync(
     std::vector<std::unique_ptr<sync_session_ctx_t>> &synced_session_ctxs,
     encode_session_ctx_queue_t &encode_session_ctx_queue,
     std::vector<std::string> &display_names,
-    int &display_p
+    int &display_p,
+    monitor_switch_context_t &monitor_switch
   ) {
     const auto &encoder = *chosen_encoder;
 
@@ -2723,10 +2957,10 @@ namespace video {
       // Process any pending display switch with the new list of displays
       if (switch_display_event->peek()) {
         display_p = std::clamp(*switch_display_event->pop(), 0, static_cast<int>(display_names.size()) - 1);
+        monitor_switch.requested.reset();
       }
 
-      // reset_display() will sleep between retries
-      reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);
+      monitor_switch.reset(disp, encoder.platform_formats->dev_type, display_names, display_p, synced_session_ctxs.front()->config);
       if (disp) {
         break;
       }
@@ -2794,7 +3028,7 @@ namespace video {
             ctx->idr_events->pop();
           }
 
-          if (img && (frame_captured || ctx->config.cursor_focus.enabled) && pos->session->convert(*img)) {
+          if (img && (frame_captured || ctx->config.cursor_focus.enabled || ctx->config.viewport_crop) && pos->session->convert(*img)) {
             BOOST_LOG(error) << "Could not convert image"sv;
             ctx->shutdown_event->raise(true);
 
@@ -2818,7 +3052,10 @@ namespace video {
           ++pos;
         })
 
-        if (switch_display_event->peek()) {
+        if (!switch_display_event->peek()) {
+          monitor_switch.poll(display_names[display_p], synced_session_ctxs.empty() ? nullptr : synced_session_ctxs.front()->config.viewport_crop, synced_session_ctxs.size(), disp.get());
+        }
+        if (switch_display_event->peek() || monitor_switch.requested) {
           ec = platf::capture_e::reinit;
           return false;
         }
@@ -2875,7 +3112,8 @@ namespace video {
 
     std::vector<std::string> display_names;
     int display_p = -1;
-    while (encode_run_sync(synced_session_ctxs, ctx, display_names, display_p) == encode_e::reinit) {}
+    monitor_switch_context_t monitor_switch;
+    while (encode_run_sync(synced_session_ctxs, ctx, display_names, display_p, monitor_switch) == encode_e::reinit) {}
   }
 
   /**
@@ -2982,6 +3220,10 @@ namespace video {
     void *channel_data
   ) {
     config = resolve_dynamic_range(*chosen_encoder, config);
+    if (config::video.viewport_crop.enabled) {
+      config.viewport_crop = std::make_shared<viewport::state_t>();
+      config.viewport_crop->settings = config::video.viewport_crop;
+    }
 
     auto idr_events = mail->event<bool>(mail::idr);
 

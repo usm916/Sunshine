@@ -17,7 +17,7 @@ cmake --build cmake-build-custom --parallel "$jobs"
 (
   cd cmake-build-custom/tests
   ./test_sunshine.exe \
-    --gtest_filter='Clipboard*:WindowsClipboard.*:InputPacketValidationTest.*:ControlPacketTests.*:ConfigConsistencyTest.*:LocaleConsistencyTest.*:ConfigDefaultsTest.*:ConfigPersistenceTest.ClipboardDirectionsRejectUnknownModes' \
+    --gtest_filter='ViewportCrop*:FocusAnchor*:WindowsFocusAnchor*:LowBandwidth*:VideoLowBandwidth*:AdaptiveBitrate*:NetworkMetrics*:Stream*:NvencBitrate*:NvencDynamicFactory*:VideoBitrate*:CursorFocus*:Clipboard*:WindowsClipboard*:InputPacketValidationTest*:ControlPacketTests*:ConcatAndInsertTests*:ConfigConsistency*:LocaleConsistency*:ConfigDefaults*:ConfigPersistence*' \
     --gtest_output=xml:../clipboard-tests.xml
 )
 gcc -std=c11 -Wall -Wextra -Werror \
@@ -27,7 +27,9 @@ gcc -std=c11 -Wall -Wextra -Werror \
 ./cmake-build-custom/clipboard-protocol-test.exe
 cmake --install cmake-build-custom --strip --prefix "$PWD/cmake-build-custom/package"
 cp LICENSE README.custom.md cmake-build-custom/package/
+mkdir -p cmake-build-custom/package/docs/custom
+cp docs/custom/*.md cmake-build-custom/package/docs/custom/
 mkdir -p cmake-build-custom/package/scripts/custom
-cp scripts/custom/start-sunshine.ps1 cmake-build-custom/package/scripts/custom/
+cp scripts/custom/*.ps1 scripts/custom/*.cs cmake-build-custom/package/scripts/custom/
 cp "scripts/custom/Start Sunshine.cmd" cmake-build-custom/package/
 ./cmake-build-custom/package/sunshine.exe --help

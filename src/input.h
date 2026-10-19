@@ -174,6 +174,27 @@ namespace input {
     void send_relative_mouse_packet(std::shared_ptr<input_t> &input, std::int16_t delta_x, std::int16_t delta_y);
 
     /**
+     * @brief Translate test input through the production committed-viewport mapping.
+     * @param input Session input state.
+     * @param x Client X coordinate in encoded pixels.
+     * @param y Client Y coordinate in encoded pixels.
+     * @param width Client width.
+     * @param height Client height.
+     * @return Host coordinate pair or no initialized touch port.
+     */
+    std::optional<std::pair<float, float>> map_absolute_point(std::shared_ptr<input_t> &input, float x, float y, float width, float height);
+
+    /**
+     * @brief Prepare a direct-contact packet through production crop and contact handling.
+     * @param input Session state.
+     * @param pen Select a pen packet instead of a touch packet.
+     * @param event Moonlight direct-contact event type.
+     * @param id Touch contact identifier.
+     * @return Normalized monitor coordinates or no valid pointer data.
+     */
+    std::optional<std::pair<float, float>> map_direct_pointer(std::shared_ptr<input_t> &input, bool pen, std::uint8_t event, std::uint32_t id);
+
+    /**
      * @brief Forget every key Sunshine tracks as pressed and cancel any pending key repeat.
      */
     void reset_keyboard_state();
@@ -198,6 +219,11 @@ namespace input {
      * @return Number of queued packets, or zero for an empty input pointer.
      */
     std::size_t queued_input_packet_count(const std::shared_ptr<input_t> &input);
+    /**
+     * @brief Reset held session input synchronously for a test without starting the worker pool.
+     * @param input Session to reset.
+     */
+    void reset_session_inputs(const std::shared_ptr<input_t> &input);
   }  // namespace testing
 #endif
 
@@ -217,6 +243,7 @@ namespace input {
 
     int env_logical_width;  ///< Width of the full capture environment after display scaling.
     int env_logical_height;  ///< Height of the full capture environment after display scaling.
+    std::shared_ptr<video::viewport::state_t> viewport_crop;  ///< Last submitted crop used by direct input.
 
     /**
      * @brief Check whether the touch-port bounds are initialized.

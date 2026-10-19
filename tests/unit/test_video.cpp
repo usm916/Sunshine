@@ -26,6 +26,118 @@ extern "C" {
 
 using namespace std::literals;
 
+namespace {
+
+  class bitrate_test_session_t: public video::encode_session_t {
+  public:
+    explicit bitrate_test_session_t(std::uint32_t initial_target_kbps = 0):
+        last_target_kbps {initial_target_kbps} {
+    }
+
+    int convert(platf::img_t &) override {
+      return 0;
+    }
+
+    void request_idr_frame() override {
+      // Frame request side effects are outside this bitrate-only test double.
+    }
+
+    void request_normal_frame() override {
+      // Frame request side effects are outside this bitrate-only test double.
+    }
+
+    void invalidate_ref_frames(int64_t, int64_t) override {
+      // Reference-frame invalidation is outside this bitrate-only test double.
+    }
+
+    video::bitrate_reconfigure_result_t reconfigure_bitrate(std::uint32_t target_kbps) override {
+      last_target_kbps = target_kbps;
+      return {
+        video::bitrate_reconfigure_status_e::applied,
+        25'000,
+        target_kbps,
+        target_kbps,
+      };
+    }
+
+    std::uint32_t last_target_kbps = 0;
+  };
+
+  class unsupported_bitrate_test_session_t: public video::encode_session_t {
+  public:
+    int convert(platf::img_t &) override {
+      return 0;
+    }
+
+    void request_idr_frame() override {
+      // Frame request side effects are outside this unsupported-backend test double.
+    }
+
+    void request_normal_frame() override {
+      // Frame request side effects are outside this unsupported-backend test double.
+    }
+
+    void invalidate_ref_frames(int64_t, int64_t) override {
+      // Reference-frame invalidation is outside this unsupported-backend test double.
+    }
+  };
+
+}  // namespace
+
+TEST(VideoBitrateReconfigureTest, StatusNamesAreStable) {
+  EXPECT_EQ("applied", video::bitrate_reconfigure_status_name(video::bitrate_reconfigure_status_e::applied));
+  EXPECT_EQ("unchanged", video::bitrate_reconfigure_status_name(video::bitrate_reconfigure_status_e::unchanged));
+  EXPECT_EQ("invalid", video::bitrate_reconfigure_status_name(video::bitrate_reconfigure_status_e::invalid));
+  EXPECT_EQ("unsupported", video::bitrate_reconfigure_status_name(video::bitrate_reconfigure_status_e::unsupported));
+  EXPECT_EQ("failed", video::bitrate_reconfigure_status_name(video::bitrate_reconfigure_status_e::failed));
+  EXPECT_EQ("unknown", video::bitrate_reconfigure_status_name(static_cast<video::bitrate_reconfigure_status_e>(99)));
+}
+
+TEST(VideoBitrateReconfigureTest, LatestPendingRequestWins) {
+  auto mail = std::make_shared<safe::mail_raw_t>();
+  auto bitrate_events = mail->event<video::bitrate_reconfigure_request_t>("test-video-bitrate");
+  bitrate_test_session_t session;
+  video::config_t config {};
+  config.bitrate = 25'000;
+
+  EXPECT_FALSE(video::apply_pending_bitrate_reconfiguration(bitrate_events, session, config).has_value());
+  bitrate_events->raise(video::bitrate_reconfigure_request_t {25'000});
+  bitrate_events->raise(video::bitrate_reconfigure_request_t {40'000});
+
+  const auto result = video::apply_pending_bitrate_reconfiguration(bitrate_events, session, config);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(video::bitrate_reconfigure_status_e::applied, result->status);
+  EXPECT_EQ(40'000U, session.last_target_kbps);
+  EXPECT_EQ(40'000, config.bitrate);
+  EXPECT_FALSE(video::apply_pending_bitrate_reconfiguration(bitrate_events, session, config).has_value());
+}
+
+TEST(VideoBitrateReconfigureTest, SuccessfulRequestPersistsAcrossEncoderReinitialization) {
+  auto mail = std::make_shared<safe::mail_raw_t>();
+  auto bitrate_events = mail->event<video::bitrate_reconfigure_request_t>("test-video-bitrate-reinit");
+  bitrate_test_session_t initial_session;
+  video::config_t config {};
+  config.bitrate = 25'000;
+
+  bitrate_events->raise(video::bitrate_reconfigure_request_t {40'000});
+  const auto result = video::apply_pending_bitrate_reconfiguration(bitrate_events, initial_session, config);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(video::bitrate_reconfigure_status_e::applied, result->status);
+
+  bitrate_test_session_t reinitialized_session {static_cast<std::uint32_t>(config.bitrate)};
+  EXPECT_EQ(40'000U, reinitialized_session.last_target_kbps);
+}
+
+TEST(VideoBitrateReconfigureTest, UnsupportedBackendKeepsFixedBehavior) {
+  unsupported_bitrate_test_session_t session;
+  const auto result = session.reconfigure_bitrate(40'000);
+
+  EXPECT_EQ(video::bitrate_reconfigure_status_e::unsupported, result.status);
+  EXPECT_EQ(0U, result.old_target_kbps);
+  EXPECT_EQ(40'000U, result.requested_target_kbps);
+  EXPECT_EQ(0U, result.effective_target_kbps);
+}
+
 struct EncoderTest: PlatformTestSuite, testing::WithParamInterface<video::encoder_t *> {
   void SetUp() override {
     BaseTest::SetUp();
@@ -408,4 +520,77 @@ TEST(SoftwareEncoderConversion, Bgr0AndNv12) {
   fallback_nv12_img.height = h;
   fallback_nv12_img.row_pitch = w;
   EXPECT_EQ(device.convert(fallback_nv12_img), 0);
+}
+
+TEST(VideoLowBandwidthApply, CommitsFpsBitrateAndFocusOnlyAfterSuccessfulNativeUpdate) {
+  bitrate_test_session_t session;
+  video::config_t config {};
+  config.low_telemetry = std::make_shared<video::low_bandwidth::telemetry_t>();
+  config.focus_template.shape = "rectangle";
+  config.focus_template.width = 420;
+  const video::low_bandwidth::profile_t profile {250, 80, 4};
+  EXPECT_TRUE(video::apply_low_bandwidth_profile(session, config, profile));
+  EXPECT_EQ(config.low_profile, profile);
+  EXPECT_EQ(config.bitrate, 80);
+  EXPECT_EQ(config.cursor_focus.background_scale, 6);
+  EXPECT_EQ(config.cursor_focus.width, 420);
+  EXPECT_EQ(config.low_telemetry->reconfigure_status.load(), 1);
+  unsupported_bitrate_test_session_t unsupported;
+  EXPECT_FALSE(video::apply_low_bandwidth_profile(unsupported, config, {100, 20, 2}));
+  EXPECT_EQ(config.low_profile, profile);
+  EXPECT_EQ(config.bitrate, 80);
+  EXPECT_EQ(config.low_telemetry->reconfigure_status.load(), -1);
+}
+
+TEST(VideoLowBandwidthApply, RecoveredBudgetRestoresBackgroundDetailAndThenBypassesIt) {
+  bitrate_test_session_t session;
+  video::config_t config {};
+  config.low_telemetry = std::make_shared<video::low_bandwidth::telemetry_t>();
+  config.focus_template.shape = "rectangle";
+  config.focus_template.width = 420;
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, {250, 80, 4}));
+  EXPECT_EQ(config.cursor_focus.background_scale, 6);
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, {1000, 600, 10}));
+  EXPECT_EQ(config.cursor_focus.background_scale, 3);
+  EXPECT_EQ(config.cursor_focus.background_loop_ms, 1000);
+  EXPECT_EQ(config.low_profile.fps, 10);
+  EXPECT_EQ(config.cursor_focus.width, 420);
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, {3000, 1700, 15}));
+  EXPECT_FALSE(config.cursor_focus.enabled);
+  EXPECT_EQ(config.low_profile.fps, 15);
+  EXPECT_EQ(config.bitrate, 1700);
+}
+
+TEST(VideoLowBandwidthApply, AudioResumesOnlyAfterTheEncoderReservesItsBudget) {
+  bitrate_test_session_t session;
+  unsupported_bitrate_test_session_t unsupported;
+  video::config_t config {};
+  config.low_telemetry = std::make_shared<video::low_bandwidth::telemetry_t>();
+  config.audio_runtime = std::make_shared<audio::runtime_t>();
+  const video::low_bandwidth::profile_t resumed {3000, 1500, 15, true};
+  EXPECT_FALSE(video::apply_low_bandwidth_profile(unsupported, config, resumed));
+  EXPECT_EQ(config.audio_runtime->generation.load(), 0);
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, resumed));
+  EXPECT_EQ(config.audio_runtime->generation.load(), 1);
+  EXPECT_EQ(config.low_profile, resumed);
+  EXPECT_FALSE(video::apply_low_bandwidth_profile(unsupported, config, {2000, 1000, 10, false}));
+  EXPECT_EQ(config.audio_runtime->generation.load(), 2);
+  EXPECT_EQ(config.low_profile, resumed);
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, resumed));
+  EXPECT_EQ(config.audio_runtime->generation.load(), 3);
+  ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, {1000, 600, 10, false}));
+  EXPECT_EQ(config.audio_runtime->generation.load(), 4);
+}
+
+TEST(VideoLowBandwidthApply, AppliesTheStatefulCoarsePolicyInTheThresholdDeadBand) {
+  bitrate_test_session_t session;
+  video::config_t config {};
+  config.low_telemetry = std::make_shared<video::low_bandwidth::telemetry_t>();
+  auto profile = video::low_bandwidth::make_profile({}, 5000, 30);
+  for (const auto budget : {2952U, 2699U, 2952U, 3000U}) {
+    const bool was_coarse = profile.coarse_background;
+    profile = video::low_bandwidth::make_profile({}, budget, 30, 1432, 2, 20, 0, &profile);
+    ASSERT_TRUE(video::apply_low_bandwidth_profile(session, config, profile));
+    EXPECT_EQ(config.cursor_focus.enabled, budget < (was_coarse ? 3000U : 2700U));
+  }
 }

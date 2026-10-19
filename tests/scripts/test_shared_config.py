@@ -1,7 +1,9 @@
 """@file test_shared_config.py
 @brief Verify persistent configuration migration and native launch arguments.
 """
+import base64
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -45,13 +47,15 @@ class SharedConfigTests(unittest.TestCase):
                 (config / relative).write_text(content, encoding="utf-8")
         return exe
 
-    def invoke(self, exe, shared, prepare=True, extra=None):
+    def invoke(self, exe, shared, prepare=True, extra=None, require_admin=False):
         """@brief Run the actual launcher and optionally parse its prepared command."""
         command = "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
         command += "& " + quote(SCRIPT)
         if exe is not None:
             command += " -ExecutablePath " + quote(exe)
         command += " -ConfigDirectory " + quote(shared)
+        if require_admin:
+            command += " -RequireAdministrator"
         if prepare:
             command += " -PrepareOnly"
         if extra:
@@ -167,6 +171,84 @@ class SharedConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Sunshine", result.stdout)
         self.assertEqual(state.read_bytes(), before)
+
+
+    def elevation_command(self, launcher, exe, shared, arguments, cancelled=False):
+        """@brief Exercise the real elevation helper while replacing only Windows process creation."""
+        mock = (
+            "throw [System.ComponentModel.Win32Exception]::new(1223)"
+            if cancelled else
+            "$script:captured = @{FilePath=$FilePath; Verb=$Verb; WindowStyle=$WindowStyle; "
+            "ArgumentList=$ArgumentList; Wait=$Wait.IsPresent; PassThru=$PassThru.IsPresent}; "
+            "[pscustomobject]@{ExitCode=37}"
+        )
+        command = "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+        command += "$ast = [System.Management.Automation.Language.Parser]::ParseFile(" + quote(SCRIPT) + ",[ref]$null,[ref]$null); "
+        command += "$ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false) | ForEach-Object {Invoke-Expression $_.Extent.Text}; "
+        command += "function Start-Process {param($FilePath,$Verb,$WindowStyle,$ArgumentList,[switch]$Wait,[switch]$PassThru,$ErrorAction) " + mock + "}; "
+        command += "try {$code = Invoke-SunshineElevation -ScriptPath " + quote(launcher)
+        command += " -ExecutablePath " + quote(exe) + " -ConfigDirectory " + quote(shared)
+        command += " -SunshineArguments @(" + ",".join(quote(a) for a in arguments) + "); "
+        command += "@{ExitCode=$code; Launch=$script:captured} | ConvertTo-Json -Depth 5} catch {@{Cancelled=$true; Error=$_.Exception.Message} | ConvertTo-Json}"
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                capture_output=True, encoding="utf-8", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_prepare_only_does_not_elevate_or_change_shared_path(self):
+        """@brief Allow noninteractive inspection even when CMD requests administrator rights."""
+        exe = self.build("administrator build")
+        shared = self.root / "original user settings"
+        result = self.invoke(exe, shared, require_admin=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["ConfigDirectory"], str(shared))
+
+    def test_elevation_preserves_literal_arguments_and_requests_windows_uac(self):
+        """@brief Preserve Unicode, quoting and empty argument arrays through the encoded elevated bootstrap."""
+        exe = self.build("日本語 build's folder")
+        shared = self.root / "original user's settings"
+        recorder = self.root / "record launcher.ps1"
+        recorder.write_text(
+            "param([switch]$RequireAdministrator,[string]$ExecutablePath,[string]$ConfigDirectory,[string[]]$SunshineArguments=@())\n"
+            "@{Admin=$RequireAdministrator.IsPresent; ExecutablePath=$ExecutablePath; ConfigDirectory=$ConfigDirectory; Arguments=@($SunshineArguments)} | ConvertTo-Json -Depth 4\n",
+            encoding="utf-8-sig")
+        for arguments in [[], ["port=48189", "value=日本語 'quotes' \"double\"", "literal=$(throw 'must not execute'); & exit 9"]]:
+            with self.subTest(arguments=arguments):
+                details = self.elevation_command(recorder, exe, shared, arguments)
+                self.assertEqual(details["ExitCode"], 37)
+                launch = details["Launch"]
+                self.assertEqual(launch["Verb"], "RunAs")
+                self.assertEqual(launch["WindowStyle"], "Hidden")
+                self.assertTrue(launch["Wait"])
+                self.assertTrue(launch["PassThru"])
+                self.assertEqual(launch["ArgumentList"][:2], ["-NoProfile", "-EncodedCommand"])
+                bootstrap = base64.b64decode(launch["ArgumentList"][2]).decode("utf-16-le")
+                payload = json.loads(base64.b64decode(re.search(r"FromBase64String\('([^']+)'\)", bootstrap)[1]).decode("utf-8"))
+                self.assertEqual(payload["SunshineArguments"], arguments)
+                result = subprocess.run(["powershell.exe", "-NoProfile", "-EncodedCommand", launch["ArgumentList"][2]],
+                                        capture_output=True, encoding="utf-8", timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actual = json.loads(result.stdout)
+                self.assertTrue(actual["Admin"])
+                self.assertEqual(actual["ExecutablePath"], str(exe))
+                self.assertEqual(actual["ConfigDirectory"], str(shared))
+                self.assertEqual(actual["Arguments"], arguments)
+                self.assertFalse(shared.exists())
+
+    def test_elevated_bootstrap_propagates_native_failure_exit_code(self):
+        """@brief Preserve native failure status instead of reporting an elevated launch as successful."""
+        recorder = self.root / "failure.ps1"
+        recorder.write_text("param([switch]$RequireAdministrator,[string]$ExecutablePath,[string]$ConfigDirectory,[string[]]$SunshineArguments)\nexit 7\n", encoding="utf-8-sig")
+        details = self.elevation_command(recorder, self.build("build"), self.root / "shared", [])
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-EncodedCommand", details["Launch"]["ArgumentList"][2]], capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_cancelled_elevation_does_not_launch_or_create_shared_store(self):
+        """@brief Propagate a declined UAC request without silently running Sunshine unelevated."""
+        shared = self.root / "not created"
+        details = self.elevation_command(SCRIPT, self.build("build"), shared, [], cancelled=True)
+        self.assertTrue(details["Cancelled"])
+        self.assertFalse(shared.exists())
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

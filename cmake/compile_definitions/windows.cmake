@@ -71,6 +71,10 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/display.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/display_base.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/display_vram.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/focus_anchor.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/focus_anchor.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/monitor_switch.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/monitor_switch.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/display_ram.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/display_wgc.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/audio.cpp"
@@ -101,6 +105,9 @@ list(PREPEND PLATFORM_LIBRARIES
         libwinpthread.a
         minhook::minhook
         ntdll
+        ole32
+        oleaut32
+        oleacc
         setupapi
         shlwapi
         synchronization.lib

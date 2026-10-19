@@ -30,6 +30,15 @@ extern "C" {
 #include "src/platform/virtualhid_input.h"
 #include "src/utility.h"
 
+namespace input::testing {
+  /**
+   * @brief Private test bridge for nonzero contact footprints through the production parser.
+   * @param input Session state.
+   * @return Host-pixel contact ellipse.
+   */
+  std::optional<std::pair<float, float>> direct_contact_area(std::shared_ptr<input_t> &input);
+}  // namespace input::testing
+
 namespace {
   /**
    * @brief Protocol metadata for a fixed-size input packet.
@@ -502,4 +511,56 @@ TEST_F(InputGamepadSessionTest, RetargetsRelativeMouseFromLatestStreamGeometry) 
   EXPECT_EQ(mouse_event.x, -5);
   EXPECT_EQ(mouse_event.y, 9);
   EXPECT_EQ(context().mouse_viewport.offset_x, 0);
+}
+
+TEST_F(InputGamepadSessionTest, MapsAbsoluteInputToCommittedCropAndPreservesRelativeDesktopBounds) {
+  auto session_mail = std::make_shared<safe::mail_raw_t>();
+  auto stream_input = input::alloc(session_mail, "crop-input-client");
+  input::touch_port_t port {{0, 0, 1920, 1080, 3840, 2160}, 3840, 2160, 0, 0, 2.0f, 1.0f, 0, 0};
+  port.viewport_crop = std::make_shared<video::viewport::state_t>();
+  port.viewport_crop->frame = video::viewport::track({}, {true}, 3840, 2160, 1920, 1080, {{1920, 1080}});
+  session_mail->event<input::touch_port_t>(mail::touch_port)->raise(port);
+  EXPECT_EQ(input::testing::map_absolute_point(stream_input, 0, 0, 1920, 1080), (std::pair<float, float> {960, 540}));
+  EXPECT_EQ(input::testing::map_absolute_point(stream_input, 960, 540, 1920, 1080), (std::pair<float, float> {1920, 1080}));
+  port.viewport_crop->frame.x = 1500;
+  port.offset_x = -3840;
+  port.env_offset_x = -3840;
+  port.env_width = 7680;
+  session_mail->event<input::touch_port_t>(mail::touch_port)->raise(port);
+  EXPECT_EQ(input::testing::map_absolute_point(stream_input, 0, 0, 1920, 1080), (std::pair<float, float> {-2340, 540}));
+  input::testing::send_relative_mouse_packet(stream_input, 12, -7);
+  EXPECT_EQ(context().mouse_viewport.offset_x, -3840);
+  EXPECT_EQ(context().mouse_viewport.width, 3840);
+  ASSERT_NE(context().mouse, nullptr);
+  EXPECT_EQ(context().mouse->last_submitted_event().x, 12);
+  port.viewport_crop->frame = {};
+  EXPECT_EQ(input::testing::map_absolute_point(stream_input, 960, 540, 1920, 1080), (std::pair<float, float> {-1920, 1080}));
+}
+
+TEST_F(InputGamepadSessionTest, DirectCropContactsNormalizeToFullMonitorAndResetOnDisconnect) {
+  auto session_mail = std::make_shared<safe::mail_raw_t>();
+  auto stream_input = input::alloc(session_mail, "crop-touch-client");
+  input::touch_port_t port {{0, 0, 1920, 1080, 3840, 2160}, 3840, 2160, 0, 0, 2.0f, 1.0f, 0, 0};
+  port.viewport_crop = std::make_shared<video::viewport::state_t>();
+  port.viewport_crop->frame = video::viewport::track({}, {true}, 3840, 2160, 1920, 1080, {{1920, 1080}});
+  session_mail->event<input::touch_port_t>(mail::touch_port)->raise(port);
+  EXPECT_EQ(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_DOWN, 1), (std::pair<float, float> {0.25f, 0.25f}));
+  EXPECT_EQ(port.viewport_crop->contacts.size(), 1);
+  const auto footprint = input::testing::direct_contact_area(stream_input);
+  ASSERT_TRUE(footprint);
+  EXPECT_FLOAT_EQ(footprint->first, 1920.0f / 64);
+  EXPECT_FLOAT_EQ(footprint->second, 1080.0f / 64);
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_DOWN, 2));
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, true, LI_TOUCH_EVENT_DOWN, 0));
+  EXPECT_EQ(port.viewport_crop->contacts.size(), 3);
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_UP, 1));
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, true, LI_TOUCH_EVENT_CANCEL, 0));
+  EXPECT_EQ(port.viewport_crop->contacts.size(), 1);
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_HOVER, 9));
+  EXPECT_EQ(port.viewport_crop->contacts.size(), 1);
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_CANCEL_ALL, 0));
+  EXPECT_TRUE(port.viewport_crop->contacts.empty());
+  EXPECT_TRUE(input::testing::map_direct_pointer(stream_input, false, LI_TOUCH_EVENT_DOWN, 3));
+  input::testing::reset_session_inputs(stream_input);
+  EXPECT_TRUE(port.viewport_crop->contacts.empty());
 }

@@ -7,6 +7,8 @@
   // this include
   #include "nvenc_dynamic_factory.h"
 
+  #include "src/video.h"
+
   // standard includes
   #include <bit>
   #include <utility>
@@ -136,4 +138,9 @@ namespace nvenc {
   }
 
 }  // namespace nvenc
+
+video::bitrate_reconfigure_result_t nvenc::nvenc_encoder::reconfigure_stream(std::uint32_t target_kbps, std::uint32_t) {
+  return reconfigure_bitrate(target_kbps);
+}
+
 #endif

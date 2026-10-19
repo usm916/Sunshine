@@ -6,13 +6,18 @@
 
 // standard includes
 #include <chrono>
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
 
 // local includes
+#include "audio.h"
 #include "input.h"
 #include "platform/common.h"
 #include "thread_safe.h"
 #include "video_colorspace.h"
+#include "video_low_bandwidth.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -22,6 +27,42 @@ extern "C" {
 struct AVPacket;
 
 namespace video {
+
+  /**
+   * @brief Result status for a runtime encoder bitrate reconfiguration request.
+   */
+  enum class bitrate_reconfigure_status_e {
+    applied,  ///< The encoder accepted and applied the requested bitrate.
+    unchanged,  ///< The requested bitrate already matches the active bitrate.
+    invalid,  ///< The requested bitrate is outside the backend's numeric domain.
+    unsupported,  ///< The active encoder backend cannot reconfigure bitrate at runtime.
+    failed,  ///< The backend attempted the change but the encoder rejected it.
+  };
+
+  /**
+   * @brief Describe the result of a runtime bitrate reconfiguration request.
+   */
+  struct bitrate_reconfigure_result_t {
+    bitrate_reconfigure_status_e status;  ///< Final status of the request.
+    std::uint32_t old_target_kbps;  ///< Effective target before the request, or zero when unknown.
+    std::uint32_t requested_target_kbps;  ///< Target requested by the caller.
+    std::uint32_t effective_target_kbps;  ///< Effective target after the request, or zero when unknown.
+  };
+
+  /**
+   * @brief Runtime bitrate request transported to the encoder thread.
+   */
+  struct bitrate_reconfigure_request_t {
+    std::uint32_t target_kbps;  ///< Requested encoder target in kilobits per second.
+  };
+
+  /**
+   * @brief Convert a bitrate reconfiguration status to a stable diagnostic name.
+   *
+   * @param status Status to convert.
+   * @return Stable lower-case status name.
+   */
+  std::string_view bitrate_reconfigure_status_name(bitrate_reconfigure_status_e status);
 
   /**
    * @brief Encoding configuration requested by a remote client.
@@ -39,8 +80,26 @@ namespace video {
     int dynamicRange;  ///< Encoding color depth: 0 = 8-bit, 1 = 10-bit.
     int chromaSamplingType;  ///< Chroma sampling type: 0 = 4:2:0, 1 = 4:4:4.
     int enableIntraRefresh;  ///< Intra refresh setting: 0 = disabled, 1 = enabled.
-    cursor_focus::settings_t cursor_focus {};  ///< Immutable settings selected for this connection.
+    std::shared_ptr<viewport::state_t> viewport_crop;  ///< Per-session crop shared with input and D3D conversion.
+    cursor_focus::settings_t cursor_focus {};  ///< Encoder-thread focus state for this connection.
+    low_bandwidth::settings_t low_bandwidth {};  ///< Immutable low-rate limits.
+    low_bandwidth::profile_t low_profile {};  ///< Encoder-thread active low-rate profile.
+    cursor_focus::settings_t focus_template {};  ///< Original user-selected focus geometry.
+    std::shared_ptr<low_bandwidth::telemetry_t> low_telemetry;  ///< Sender observations shared with control/encode workers.
+    std::shared_ptr<audio::runtime_t> audio_runtime;  ///< Audio gate committed after native bitrate reservations succeed.
+    std::uint32_t audio_reserve_kbps = 0;  ///< Potential audio transport allowance for this negotiated layout.
   };
+
+  /**
+   * @brief Initialize reconnect-safe audio permission and reserve audio in the initial low-rate profile.
+   * @param audio_config Negotiated audio layout and permanent stream permission.
+   * @param video_config Initial video settings and total low-bandwidth budget.
+   * @param stream_enabled Global audio streaming permission.
+   * @param packet_bytes Video IP packet allowance.
+   * @param minimum_parity Minimum video parity shards per frame.
+   * @param fec_percent Video FEC percentage.
+   */
+  void configure_session_audio(audio::config_t &audio_config, config_t &video_config, bool stream_enabled, int packet_bytes, int minimum_parity, int fec_percent);
 
   namespace amf {
 
@@ -426,6 +485,37 @@ namespace video {
     virtual ~encode_session_t() = default;
 
     /**
+     * @brief Reconfigure bitrate and actual encoder frequency together.
+     * @param target_kbps Codec bitrate.
+     * @param fps Actual encoded frequency.
+     * @return Backend result; unsupported backends retain their fixed initialization.
+     */
+    virtual bitrate_reconfigure_result_t reconfigure_stream(std::uint32_t target_kbps, std::uint32_t fps) {
+      return reconfigure_bitrate(target_kbps);
+    }
+
+    /**
+     * @brief Apply focus geometry on the encode thread before the next conversion.
+     * @param settings Current detail and background parameters.
+     */
+    virtual void set_cursor_focus(const cursor_focus::settings_t &settings) {}
+
+    /**
+     * @brief Reconfigure the encoder bitrate without replacing the active session.
+     *
+     * @param target_kbps Requested encoder target in kilobits per second.
+     * @return Result of the request. Backends are unsupported by default.
+     */
+    virtual bitrate_reconfigure_result_t reconfigure_bitrate(std::uint32_t target_kbps) {
+      return {
+        bitrate_reconfigure_status_e::unsupported,
+        0,
+        target_kbps,
+        0,
+      };
+    }
+
+    /**
      * @brief Convert a captured frame into the encoder's required input representation.
      *
      * @param img Captured image supplied by the platform display backend.
@@ -451,6 +541,29 @@ namespace video {
      */
     virtual void invalidate_ref_frames(int64_t first_frame, int64_t last_frame) = 0;
   };
+
+  /**
+   * @brief Apply the latest pending bitrate request and retain it across encoder reinitialization.
+   *
+   * @param bitrate_events Latest-wins bitrate request event for the stream session.
+   * @param session Active encoder session.
+   * @param config Mutable session configuration reused when the encoder is recreated.
+   * @return Reconfiguration result when a request was pending, otherwise no value.
+   */
+  /**
+   * @brief Apply an indivisible low-rate encoder and background transaction.
+   * @param session Encoder owning the hardware state.
+   * @param config Encoder-thread session configuration.
+   * @param profile New paired bitrate/FPS profile.
+   * @return True when all software state was committed after a successful native update.
+   */
+  bool apply_low_bandwidth_profile(encode_session_t &session, config_t &config, const low_bandwidth::profile_t &profile);
+
+  std::optional<bitrate_reconfigure_result_t> apply_pending_bitrate_reconfiguration(
+    const safe::mail_raw_t::event_t<bitrate_reconfigure_request_t> &bitrate_events,
+    encode_session_t &session,
+    config_t &config
+  );
 
   // encoders
   extern encoder_t software;

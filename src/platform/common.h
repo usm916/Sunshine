@@ -604,6 +604,15 @@ namespace platf {
     virtual void set_cursor_focus(const video::cursor_focus::settings_t &settings) {
     }
 
+    /**
+     * @brief Configure per-session cropping before output allocation.
+     * @param state Shared viewport/input state, or null to disable cropping.
+     * @return Whether this backend supports the requested crop policy.
+     */
+    virtual bool set_viewport_crop(const std::shared_ptr<video::viewport::state_t> &state) {
+      return !state;
+    }
+
     video::sunshine_colorspace_t colorspace;  ///< Colorspace metadata expected by the encoder.
   };
 

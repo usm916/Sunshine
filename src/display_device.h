@@ -162,6 +162,7 @@ namespace display_device {
    * @brief Parse the user configuration and the session information.
    * @param video_config User's video related configuration.
    * @param session Session information.
+   * @details Enabled crop monitor traversal preserves other active displays instead of applying EnsureOnlyDisplay.
    * @return Parsed single display configuration or
    *         a tag indicating that the parsing has failed or
    *         a tag indicating that the user does not want to perform any configuration.

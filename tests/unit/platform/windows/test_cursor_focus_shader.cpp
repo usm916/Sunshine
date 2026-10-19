@@ -18,7 +18,9 @@
   #include <src/file_handler.h>
   #include <src/platform/windows/cursor_focus_background.h>
   #include <src/platform/windows/display.h>
+  #include <src/platform/windows/viewport_crop.h>
   #include <src/video_cursor_focus.h>
+  #include <src/video_low_bandwidth.h>
 
 using namespace platf::dxgi;
 using namespace ::video::cursor_focus;
@@ -26,7 +28,7 @@ using namespace ::video::cursor_focus;
 /**
  * @brief Render the production sampling helper into a small RGBA texture without touching the desktop.
  */
-class CursorFocusShaderTest: public testing::Test {
+class CursorFocusShaderTest: public ::testing::Test {
 protected:
   /**
    * @brief Compile one shader entry point and report any compiler diagnostics.
@@ -397,5 +399,132 @@ TEST(CursorFocusShaderCompilationTest, CompilesEveryProductionConversionVariant)
     ++count;
   }
   EXPECT_GE(count, 15);
+}
+
+TEST_F(CursorFocusShaderTest, ViewportCropSamplesNativePixelsWithoutResizingTheDesktop) {
+  const ::video::viewport::frame_t frame {32, 16, 64, 48, width, height, 64, 48, true};
+  auto crop = ::video::viewport::shader_constants(frame, 0);
+  buf_t buffer;
+  ASSERT_EQ(create_viewport_crop_buffer(device.get(), buffer), S_OK);
+  D3D11_BUFFER_DESC desc {};
+  buffer->GetDesc(&desc);
+  ASSERT_EQ(desc.Usage, D3D11_USAGE_DEFAULT);
+  context->UpdateSubresource(buffer.get(), 0, nullptr, &crop, 0, 0);
+  context->PSSetConstantBuffers(3, 1, &buffer);
+  const D3D11_VIEWPORT viewport {0, 0, 64, 48, 0, 1};
+  context->RSSetViewports(1, &viewport);
+  const auto pixels = render({});
+  ASSERT_EQ(pixels.size(), source.size());
+  for (int y = 0; y < 48; ++y) {
+    for (int x = 0; x < 64; ++x) {
+      for (int channel = 0; channel < 4; ++channel) {
+        EXPECT_EQ(pixels[(y * width + x) * 4 + channel], source[((y + 16) * width + x + 32) * 4 + channel]);
+      }
+    }
+  }
+  // A pan changes only the origin, with the same fixed encoder viewport.
+  crop.origin = {48.0f / width, 32.0f / height};
+  context->UpdateSubresource(buffer.get(), 0, nullptr, &crop, 0, 0);
+  const auto moved = render({});
+  for (int y = 0; y < 48; ++y) {
+    for (int x = 0; x < 64; ++x) {
+      EXPECT_EQ(moved[(y * width + x) * 4 + 1], source[((y + 32) * width + x + 48) * 4 + 1]);
+      EXPECT_EQ(moved[(y * width + x) * 4 + 2], source[((y + 32) * width + x + 48) * 4 + 2]);
+    }
+  }
+}
+
+TEST_F(CursorFocusShaderTest, PanningCropRetainsFrozenBackgroundInOriginalSourceCoordinates) {
+  auto crop = ::video::viewport::shader_constants({32, 16, 64, 48, width, height, 64, 48, true}, 0);
+  buf_t buffer;
+  ASSERT_EQ(create_viewport_crop_buffer(device.get(), buffer), S_OK);
+  D3D11_BUFFER_DESC desc {};
+  buffer->GetDesc(&desc);
+  ASSERT_EQ(desc.Usage, D3D11_USAGE_DEFAULT);
+  context->UpdateSubresource(buffer.get(), 0, nullptr, &crop, 0, 0);
+  context->PSSetConstantBuffers(3, 1, &buffer);
+  const D3D11_VIEWPORT viewport {0, 0, 64, 48, 0, 1};
+  context->RSSetViewports(1, &viewport);
+  settings_t settings {true, 32, 4};
+  settings.shape = "rectangle";
+  settings.width = settings.height = 32;
+  const auto focus = make_constants(settings, geometry, 64, 48);
+  cursor_focus_background_t background;
+  render_background(background, focus, -1, 0);
+  replace_input(255);
+  crop.origin = {48.0f / width, 32.0f / height};
+  context->UpdateSubresource(buffer.get(), 0, nullptr, &crop, 0, 0);
+  const auto pixels = render_background(background, focus, -1, 100000000);
+  EXPECT_EQ(pixels[(16 * width + 16) * 4], 255);
+  EXPECT_NEAR(pixels[(44 * width + 60) * 4], 128, 1);
+}
+
+TEST(ViewportCropProductionConversionTest, ReadsNativePixelsFromTwoActualConverterFrames) {
+  const ::video::viewport::frame_t first {32, 16, 64, 48, 128, 96, 64, 48, true};
+  const ::video::viewport::frame_t second {48, 32, 64, 48, 128, 96, 64, 48, true};
+  const auto pixels = platf::dxgi::testing::convert_viewport_frames(first, second);
+  ASSERT_EQ(pixels.size(), 64 * 48 * 4 * 2);
+  int index = 0;
+  for (const auto &frame : {first, second}) {
+    for (int y = 0; y < 48; ++y) {
+      for (int x = 0; x < 64; ++x) {
+        const float expected = 16 + 219.0f * (frame.x + x + frame.y + y) / 255;
+        ASSERT_NEAR(pixels[((index * 48 + y) * 64 + x) * 4 + 2], expected, 1.01f);
+      }
+    }
+    ++index;
+  }
+}
+
+TEST(ViewportCropProductionConversionTest, SectionSwitchesReadMatchingNativePixels) {
+  const auto first = ::video::viewport::track({}, {true}, 128, 96, 64, 48, {{0, 0}});
+  const auto second = ::video::viewport::track(first, {true}, 128, 96, 64, 48, {{127, 95}});
+  ASSERT_EQ(first.x, 0);
+  ASSERT_EQ(first.y, 0);
+  ASSERT_EQ(second.x, 64);
+  ASSERT_EQ(second.y, 48);
+  const auto pixels = platf::dxgi::testing::convert_viewport_frames(first, second);
+  ASSERT_EQ(pixels.size(), 64 * 48 * 4 * 2);
+  int index = 0;
+  for (const auto &frame : {first, second}) {
+    for (int y = 0; y < 48; ++y) {
+      for (int x = 0; x < 64; ++x) {
+        const float expected = 16 + 219.0f * (frame.x + x + frame.y + y) / 255;
+        ASSERT_NEAR(pixels[((index * 48 + y) * 64 + x) * 4 + 2], expected, 1.01f);
+      }
+    }
+    ++index;
+  }
+}
+
+TEST_F(CursorFocusShaderTest, RecoveredDetailUsesRawHeldPixelsAndBypassUsesFreshInput) {
+  cursor_focus_background_t background;
+  settings_t base {true, 16, 16};
+  base.automatic = true;
+  const auto degraded = make_constants(select_settings(base, 250), geometry, 64, 48);
+  const auto coarse = render_background(background, degraded, -1, 0);
+  const auto recovered = make_constants(select_settings(base, 1000), geometry, 64, 48);
+  const auto detailed = render_background(background, recovered, -1, 100000000);
+  const auto point = (1 * width + 1) * 4;
+  EXPECT_NE(coarse[point + 1], detailed[point + 1]);
+  EXPECT_NEAR(detailed[point + 1], source[point + 1], 2);
+  replace_input(255);
+  const auto bypass = render_background(background, make_constants(select_settings(base, 3000), geometry, 64, 48), -1, 200000000);
+  for (std::size_t offset = 0; offset < bypass.size(); offset += 4) {
+    ASSERT_EQ(bypass[offset], 255);
+    ASSERT_EQ(bypass[offset + 1], 40);
+    ASSERT_EQ(bypass[offset + 2], 80);
+  }
+}
+
+TEST_F(CursorFocusShaderTest, HystereticRecoveryRestoresTheSameStaticCapturePixels) {
+  cursor_focus_background_t background;
+  settings_t base {true, 16, 16};
+  const auto low = ::video::low_bandwidth::make_profile({}, 250, 30);
+  const auto restored = ::video::low_bandwidth::make_profile({}, 3000, 30, 1432, 2, 20, 0, &low);
+  const auto coarse = render_background(background, make_constants(::video::low_bandwidth::focus_settings(base, low), geometry, 64, 48), -1, 0);
+  const auto original = render_background(background, make_constants(::video::low_bandwidth::focus_settings(base, restored), geometry, 64, 48), -1, 100000000);
+  EXPECT_NE(coarse, original);
+  EXPECT_EQ(original, source);
 }
 #endif

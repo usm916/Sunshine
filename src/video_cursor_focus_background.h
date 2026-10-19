@@ -86,7 +86,7 @@ namespace video::cursor_focus {
       }
       loop_ms = std::clamp(loop_ms, -1, 60000);
       loop_frames = std::clamp(loop_frames, 0, 60000);
-      if (!initialized_ || width_ != width || height_ != height || loop_ms_ != loop_ms || loop_frames_ != loop_frames) {
+      if (!initialized_ || width_ != width || height_ != height) {
         reset();
         initialized_ = true;
         width_ = width;
@@ -96,6 +96,13 @@ namespace video::cursor_focus {
         last_ns_ = now_ns;
         result.full = true;
         return result;
+      }
+      if (loop_ms_ != loop_ms || loop_frames_ != loop_frames) {
+        // Retain the cached canvas during congestion changes; do not cause a full-screen refresh burst.
+        loop_ms_ = loop_ms;
+        loop_frames_ = loop_frames;
+        credit_ = 0;
+        last_ns_ = now_ns;
       }
       if (loop_frames == 0 && loop_ms == 0) {
         result.full = true;

@@ -9,9 +9,31 @@
 #include "thread_safe.h"
 #include "utility.h"
 
+#include <atomic>
 #include <bitset>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace audio {
+  /**
+   * @brief Shared audio gate whose generation invalidates samples queued before a pause.
+   */
+  struct runtime_t {
+    std::atomic<std::uint64_t> generation {0};  ///< Odd generations permit audio; even generations mute it.
+
+    /**
+     * @brief Change the gate without reviving audio from an earlier active generation.
+     * @param enabled Whether new samples may be captured and transmitted.
+     */
+    void set_enabled(bool enabled) {
+      const auto previous = generation.load(std::memory_order_acquire);
+      if (static_cast<bool>(previous & 1) != enabled) {
+        generation.store(previous + 1, std::memory_order_release);
+      }
+    }
+  };
+
   /**
    * @brief Supported Opus channel layouts advertised to Moonlight clients.
    */
@@ -72,7 +94,35 @@ namespace audio {
 
     std::bitset<MAX_FLAGS> flags;  ///< Enabled audio feature flags.
     bool enabled = true;  ///< Whether this session may capture, encode and send audio.
+    std::shared_ptr<runtime_t> runtime;  ///< Optional encoder-controlled gate retained across pauses.
   };
+
+  /**
+   * @brief Read the current audio generation while respecting the session's permanent mute.
+   * @param config Negotiated audio permissions and optional runtime gate.
+   * @return Odd active generation, or an even generation when muted.
+   */
+  inline std::uint64_t active_generation(const config_t &config) {
+    return !config.enabled ? 0 : config.runtime ? config.runtime->generation.load(std::memory_order_acquire) :
+                                                  1;
+  }
+
+  /**
+   * @brief Reject samples and packets captured before the most recent audio resume.
+   * @param config Session audio permissions and runtime gate.
+   * @param generation Generation attached to the captured samples.
+   * @return True only while the same active generation is still permitted.
+   */
+  inline bool generation_is_active(const config_t &config, std::uint64_t generation) {
+    return (generation & 1) && active_generation(config) == generation;
+  }
+
+  /**
+   * @brief Reserve Opus data, audio parity, encryption padding and conservative IP headers.
+   * @param config Negotiated layout and packet duration; the temporary gate is ignored.
+   * @return Potential audio transport allowance in kilobits per second, or zero for permanent mute.
+   */
+  std::uint32_t transport_reservation_kbps(const config_t &config);
 
   /**
    * @brief Reserve the legacy audio bandwidth allowance only for audio-enabled sessions.
@@ -80,7 +130,7 @@ namespace audio {
    * @return Bandwidth allowance in kilobits per second.
    */
   inline int bandwidth_reservation_kbps(const config_t &config) {
-    return config.enabled ? (config.flags[config_t::HIGH_QUALITY] ? 256 : 96) * config.channels : 0;
+    return (active_generation(config) & 1) ? (config.flags[config_t::HIGH_QUALITY] ? 256 : 96) * config.channels : 0;
   }
 
   /**
@@ -100,10 +150,35 @@ namespace audio {
    * @brief Byte buffer used for encoded audio packet payloads.
    */
   using buffer_t = util::buffer_t<std::uint8_t>;
+
   /**
    * @brief Encoded audio packet paired with platform channel metadata.
    */
-  using packet_t = std::pair<void *, buffer_t>;
+  struct packet_t {
+    void *first;  ///< Session pointer used by the global sender.
+    buffer_t second;  ///< Encoded Opus payload.
+    std::uint64_t generation = 1;  ///< Capture generation used to reject stale queued audio.
+  };
+
+  /**
+   * @brief Captured PCM data tagged with the active audio generation.
+   */
+  struct sample_t {
+    std::vector<float> data;  ///< Interleaved PCM samples.
+    std::uint64_t generation;  ///< Generation observed before sampling.
+  };
+
+#ifdef SUNSHINE_TESTS
+  namespace test_hooks {
+    /**
+     * @brief Run the production Opus worker with isolated synthetic samples and packet output.
+     * @param samples PCM input queue, stopped by the test to finish the worker.
+     * @param config Negotiated audio layout and shared gate.
+     * @param packets Private encoded output queue.
+     */
+    void encode_samples(std::shared_ptr<safe::queue_t<sample_t>> samples, config_t config, std::shared_ptr<safe::queue_t<packet_t>> packets);
+  }  // namespace test_hooks
+#endif
   /**
    * @brief Shared mailbox reference to the global audio context.
    */

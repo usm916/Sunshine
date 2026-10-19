@@ -61,3 +61,10 @@ junit.xml
 *.pyc
 .venv/
 venv/
+
+# Local test runs and host identity
+/test_sunshine.log*
+/config/
+/sunshine.conf
+/sunshine_state.json
+/credentials/

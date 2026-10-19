@@ -1,0 +1,66 @@
+{
+  "date_jst": "2026-10-19",
+  "scope": "Windows custom snapshot; macOS builds and runtime are not verified",
+  "selected_native_tests": {
+    "passed": 426,
+    "failed": 0,
+    "suites": 54,
+    "command": "See docs/custom/mac-development.md and existing Windows build instructions; native filter covers low-bandwidth, adaptive bitrate, audio, input, cursor focus, crop, monitor switching, service policy and configuration."
+  },
+  "web_tests": {
+    "passed": 72,
+    "files": 11,
+    "command": "node node_modules/vitest/vitest.mjs run tests/web"
+  },
+  "windows_script_fixture_tests": {
+    "passed": 56,
+    "command": "python -m unittest discover -s tests/scripts -p \"test_*.py\"",
+    "note": "Isolated fixtures; imported test cases are included in this count."
+  },
+  "recovery_v2_changed_executable_line_coverage": {
+    "src/video_low_bandwidth.h": {
+      "changed_executable_lines": 129,
+      "executed_changed_lines": 129,
+      "unexecuted_changed_lines": []
+    },
+    "src/video.cpp": {
+      "changed_executable_lines": 1,
+      "executed_changed_lines": 1,
+      "unexecuted_changed_lines": []
+    },
+    "src/stream.cpp": {
+      "changed_executable_lines": 10,
+      "executed_changed_lines": 10,
+      "unexecuted_changed_lines": []
+    },
+    "src/platform/windows/display_vram.cpp": {
+      "changed_executable_lines": 6,
+      "executed_changed_lines": 6,
+      "unexecuted_changed_lines": []
+    },
+    "src/video_cursor_focus_diagnostics.h": {
+      "changed_executable_lines": 9,
+      "executed_changed_lines": 9,
+      "unexecuted_changed_lines": []
+    }
+  },
+  "recovery_v2_loopback": {
+    "passed": true,
+    "host_and_client": "Windows",
+    "same_connection_coarse_enabled_then_disabled": true,
+    "capacity_steps_kbps": [
+      3000,
+      2250,
+      2025,
+      2531,
+      3000
+    ]
+  },
+  "gpu_static_image_recovery": "passed; original input pixels return when normal profile is applied",
+  "macos_build": "not_run",
+  "macos_streaming": "not_run",
+  "macos_clipboard_round_trip": "not_run",
+  "real_wan_recovery_v2": "not_run",
+  "input_loss_root_cause": "unconfirmed",
+  "artifacts_note": "Full local logs and personal/runtime configuration are excluded from Git. Previous task validation records are summarized in the custom documentation."
+}

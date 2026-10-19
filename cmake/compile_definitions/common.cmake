@@ -94,6 +94,8 @@ set(NVENC_SOURCES ${NVENC_PUBLIC_SOURCES})
 
 if(WIN32)
     set(NVENC_IMPLEMENTATION_SOURCES
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_reconfigure.cpp"
+            "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_reconfigure.h"
             "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_base.cpp"
             "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11.cpp"
             "${CMAKE_SOURCE_DIR}/src/nvenc/nvenc_d3d11_native.cpp"
@@ -169,6 +171,10 @@ set(SUNSHINE_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/rtsp.h"
         "${CMAKE_SOURCE_DIR}/src/stream.cpp"
         "${CMAKE_SOURCE_DIR}/src/stream.h"
+        "${CMAKE_SOURCE_DIR}/src/adaptive_bitrate.cpp"
+        "${CMAKE_SOURCE_DIR}/src/adaptive_bitrate.h"
+        "${CMAKE_SOURCE_DIR}/src/network_metrics.cpp"
+        "${CMAKE_SOURCE_DIR}/src/network_metrics.h"
         "${CMAKE_SOURCE_DIR}/src/video.cpp"
         "${CMAKE_SOURCE_DIR}/src/video.h"
         "${CMAKE_SOURCE_DIR}/src/video_colorspace.cpp"

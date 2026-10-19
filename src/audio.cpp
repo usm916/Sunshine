@@ -26,7 +26,7 @@ namespace audio {
   /**
    * @brief Shared queue carrying captured PCM sample buffers to the encoder thread.
    */
-  using sample_queue_t = std::shared_ptr<safe::queue_t<std::vector<float>>>;
+  using sample_queue_t = std::shared_ptr<safe::queue_t<sample_t>>;
 
   static int start_audio_control(audio_ctx_t &ctx);
   static void stop_audio_control(audio_ctx_t &);
@@ -105,9 +105,9 @@ namespace audio {
    * @param samples Queue of captured PCM sample buffers to encode.
    * @param config Audio stream settings negotiated with the client.
    * @param channel_data Platform-specific audio capture context passed to packet metadata.
+   * @param packets Encoded output queue, isolated by tests or shared by production sessions.
    */
-  void encodeThread(sample_queue_t samples, config_t config, void *channel_data) {
-    auto packets = mail::man->queue<packet_t>(mail::audio_packets);
+  void encodeThread(sample_queue_t samples, config_t config, void *channel_data, std::shared_ptr<safe::queue_t<packet_t>> packets) {
     auto stream = stream_configs[map_stream(config.channels, config.flags[config_t::HIGH_QUALITY])];
     if (config.flags[config_t::CUSTOM_SURROUND_PARAMS]) {
       apply_surround_params(stream, config.customStreamParams);
@@ -136,9 +136,12 @@ namespace audio {
 
     auto frame_size = config.packetDuration * stream.sampleRate / 1000;
     while (auto sample = samples->pop()) {
+      if (!generation_is_active(config, sample->generation)) {
+        continue;
+      }
       buffer_t packet {1400};
 
-      int bytes = opus_multistream_encode_float(opus.get(), sample->data(), frame_size, std::begin(packet), (opus_int32) packet.size());
+      int bytes = opus_multistream_encode_float(opus.get(), sample->data.data(), frame_size, std::begin(packet), (opus_int32) packet.size());
       if (bytes < 0) {
         BOOST_LOG(error) << "Couldn't encode audio: "sv << opus_strerror(bytes);
         packets->stop();
@@ -147,8 +150,26 @@ namespace audio {
       }
 
       packet.fake_resize(bytes);
-      packets->raise(channel_data, std::move(packet));
+      if (generation_is_active(config, sample->generation)) {
+        packets->raise(channel_data, std::move(packet), sample->generation);
+      }
     }
+  }
+
+#ifdef SUNSHINE_TESTS
+  void test_hooks::encode_samples(sample_queue_t samples, config_t config, std::shared_ptr<safe::queue_t<packet_t>> packets) {
+    encodeThread(std::move(samples), std::move(config), nullptr, std::move(packets));
+  }
+#endif
+
+  std::uint32_t transport_reservation_kbps(const config_t &config) {
+    if (!config.enabled) {
+      return 0;
+    }
+    const auto &stream = stream_configs[map_stream(config.channels, config.flags[config_t::HIGH_QUALITY])];
+    // Reserve 112 bytes per data/parity packet, including IPv6, RTP/FEC headers and cipher padding.
+    const auto data_bits = static_cast<std::uint64_t>(stream.bitrate) + 112ULL * 8 * 1000 / std::max(1, config.packetDuration);
+    return static_cast<std::uint32_t>((data_bits * 3 + 1999) / 2000);
   }
 
   /**
@@ -160,6 +181,12 @@ namespace audio {
       shutdown_event->view();
       return;
     }
+    while (!(active_generation(config) & 1)) {
+      if (shutdown_event->view(100ms)) {
+        return;
+      }
+    }
+    const auto initial_generation = active_generation(config);
     auto stream = stream_configs[map_stream(config.channels, config.flags[config_t::HIGH_QUALITY])];
     if (config.flags[config_t::CUSTOM_SURROUND_PARAMS]) {
       apply_surround_params(stream, config.customStreamParams);
@@ -234,7 +261,7 @@ namespace audio {
     platf::adjust_thread_priority(platf::thread_priority_e::critical);
 
     auto samples = std::make_shared<sample_queue_t::element_type>(30);
-    std::jthread thread {encodeThread, samples, config, channel_data};
+    std::jthread thread {encodeThread, samples, config, channel_data, mail::man->queue<packet_t>(mail::audio_packets)};
 
     auto fg = util::fail_guard([&]() {
       samples->stop();
@@ -244,8 +271,26 @@ namespace audio {
     });
 
     int samples_per_frame = frame_size * stream.channelCount;
+    auto capture_generation = initial_generation;
 
     while (!shutdown_event->peek()) {
+      const auto generation = active_generation(config);
+      if (!(generation & 1)) {
+        mic.reset();
+        shutdown_event->view(100ms);
+        continue;
+      }
+      if (generation != capture_generation) {
+        mic.reset();
+        capture_generation = generation;
+      }
+      if (!mic) {
+        mic = control->microphone(stream.mapping, stream.channelCount, stream.sampleRate, frame_size, continuous_audio, host_audio);
+        if (!mic) {
+          shutdown_event->view(100ms);
+          continue;
+        }
+      }
       std::vector<float> sample_buffer;
       sample_buffer.resize(samples_per_frame);
 
@@ -263,13 +308,13 @@ namespace audio {
             if (!mic) {
               BOOST_LOG(warning) << "Couldn't re-initialize audio input"sv;
             }
-          } while (!mic && !shutdown_event->view(5s));
+          } while (!mic && (active_generation(config) & 1) && !shutdown_event->view(100ms));
           continue;
         default:
           return;
       }
 
-      samples->raise(std::move(sample_buffer));
+      samples->raise(std::move(sample_buffer), generation);
     }
   }
 

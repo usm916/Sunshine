@@ -817,6 +817,14 @@ namespace input {
       return std::nullopt;
     }
 
+    if (touch_port.viewport_crop) {
+      const auto crop = touch_port.viewport_crop->snapshot();
+      if (crop.active) {
+        const auto point = video::viewport::map_point(crop, val.first * crop.output_width / size.first, val.second * crop.output_height / size.second);
+        return std::pair {touch_port.offset_x + point.first / touch_port.scalar_tpcoords, touch_port.offset_y + point.second / touch_port.scalar_tpcoords};
+      }
+    }
+
     auto scalarX = touch_port.width / size.first;
     auto scalarY = touch_port.height / size.second;
 
@@ -1423,8 +1431,9 @@ namespace input {
    * @return The monitor-local touch port, or std::nullopt if dimensions are invalid.
    */
   std::optional<platf::touch_port_t> monitor_touch_port(const input::touch_port_t &touch_port, std::pair<float, float> &coords) {
-    const float monitor_logical_w = (touch_port.width * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
-    const float monitor_logical_h = (touch_port.height * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
+    const auto crop = touch_port.viewport_crop ? touch_port.viewport_crop->snapshot() : video::viewport::frame_t {};
+    const float monitor_logical_w = crop.active ? crop.source_width / touch_port.scalar_tpcoords : (touch_port.width * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
+    const float monitor_logical_h = crop.active ? crop.source_height / touch_port.scalar_tpcoords : (touch_port.height * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
     if (monitor_logical_w <= 0.0f || monitor_logical_h <= 0.0f) {
       BOOST_LOG(warning) << "Ignoring touch/pen input due to invalid logical touch dimensions"sv;
       return std::nullopt;
@@ -1467,6 +1476,21 @@ namespace input {
       return std::nullopt;
     }
 
+    refresh_touch_port(input);
+    if (input->touch_port.viewport_crop) {
+      constexpr bool pen = std::is_same_v<decltype(packet), PSS_PEN_PACKET>;
+      const auto id = [&]() -> std::uint64_t {
+        if constexpr (pen) {
+          return 1ULL << 32;
+        } else {
+          return util::endian::little(packet->pointerId);
+        }
+      }();
+      const auto event = packet->eventType;
+      if (event == LI_TOUCH_EVENT_DOWN || event == LI_TOUCH_EVENT_UP || event == LI_TOUCH_EVENT_CANCEL || event == LI_TOUCH_EVENT_CANCEL_ALL) {
+        input->touch_port.viewport_crop->contact(id, event == LI_TOUCH_EVENT_DOWN, event == LI_TOUCH_EVENT_CANCEL_ALL);
+      }
+    }
     auto coords = client_to_touchport(
       input,
       {from_clamped_netfloat(packet->x, 0.0f, 1.0f) * 65535.f, from_clamped_netfloat(packet->y, 0.0f, 1.0f) * 65535.f},
@@ -1486,11 +1510,12 @@ namespace input {
       rotation %= 360;
     }
 
+    const auto crop = input->touch_port.viewport_crop ? input->touch_port.viewport_crop->snapshot() : video::viewport::frame_t {};
     const auto contact_area = scale_client_contact_area(
       {from_clamped_netfloat(packet->contactAreaMajor, 0.0f, 1.0f) * 65535.f,
        from_clamped_netfloat(packet->contactAreaMinor, 0.0f, 1.0f) * 65535.f},
       rotation,
-      {touch_port->width / 65535.f, touch_port->height / 65535.f}
+      {(crop.active ? input->touch_port.width : touch_port->width) / 65535.f, (crop.active ? input->touch_port.height : touch_port->height) / 65535.f}
     );
 
     return absolute_pointer_data_t {*touch_port, *coords, rotation, contact_area};
@@ -2370,6 +2395,9 @@ namespace input {
    * @param input Retained stream input state to reset.
    */
   void reset_input_state(const std::shared_ptr<input_t> &input) {
+    if (input->touch_port.viewport_crop) {
+      input->touch_port.viewport_crop->contact(0, false, true);
+    }
     reset_mouse_buttons();
     reset_keyboard_keys();
     reset_gamepads(input);
@@ -2594,6 +2622,43 @@ namespace input {
 
       std::lock_guard lock {input->input_queue_lock};
       return input->input_queue.size();
+    }
+
+    std::optional<std::pair<float, float>> map_absolute_point(std::shared_ptr<input_t> &input, float x, float y, float width, float height) {
+      return client_to_touchport(input, {x, y}, {width, height});
+    }
+
+    std::optional<std::pair<float, float>> map_direct_pointer(std::shared_ptr<input_t> &input, bool pen, std::uint8_t event, std::uint32_t id) {
+      if (pen) {
+        SS_PEN_PACKET packet {};
+        packet.eventType = event;
+        auto data = prepare_absolute_pointer_data(input, &packet);
+        return data ? std::optional {data->coords} : std::nullopt;
+      }
+      SS_TOUCH_PACKET packet {};
+      packet.eventType = event;
+      packet.pointerId = util::endian::little(id);
+      auto data = prepare_absolute_pointer_data(input, &packet);
+      return data ? std::optional {data->coords} : std::nullopt;
+    }
+
+    void reset_session_inputs(const std::shared_ptr<input_t> &input) {
+      reset_input_state(input);
+    }
+
+    /**
+     * @brief Exercise production contact-area scaling using a normalized 1/64-size touch.
+     * @param input Session state.
+     * @return Contact ellipse in host pixels or no initialized pointer data.
+     */
+    std::optional<std::pair<float, float>> direct_contact_area(std::shared_ptr<input_t> &input) {
+      SS_TOUCH_PACKET packet {};
+      packet.eventType = LI_TOUCH_EVENT_HOVER;
+      const float size = 1.0f / 64;
+      std::memcpy(packet.contactAreaMajor, &size, sizeof(size));
+      std::memcpy(packet.contactAreaMinor, &size, sizeof(size));
+      auto data = prepare_absolute_pointer_data(input, &packet);
+      return data ? std::optional {data->contact_area} : std::nullopt;
     }
   }  // namespace testing
 #endif

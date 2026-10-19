@@ -10,6 +10,9 @@
 
 // local includes
 #include "src/logging.h"
+#include "sunshine_service_config.h"
+
+#include <shellapi.h>
 
 // PROC_THREAD_ATTRIBUTE_JOB_LIST is currently missing from MinGW headers
 #ifndef PROC_THREAD_ATTRIBUTE_JOB_LIST
@@ -21,7 +24,7 @@ SERVICE_STATUS service_status;
 HANDLE stop_event;
 HANDLE session_change_event;
 
-constexpr auto SERVICE_NAME = "SunshineService";
+sunshine_service::options_t service_options;  ///< Validated SCM-only identity and configuration paths.
 
 DWORD WINAPI HandlerEx(DWORD dwControl, DWORD dwEventType, LPVOID lpEventData, LPVOID lpContext) {
   switch (dwControl) {
@@ -124,7 +127,8 @@ HANDLE OpenLogFileHandle() {
 
   // Create sunshine.log in the Temp folder (usually %SYSTEMROOT%\Temp)
   GetTempPathW(_countof(log_file_name), log_file_name);
-  wcscat_s(log_file_name, L"sunshine.log");
+  const auto filename = service_options.name == L"SunshineService" ? L"sunshine.log" : service_options.name + L".log";
+  wcscat_s(log_file_name, filename.c_str());
 
   // Preserve previous service output before opening the current log.
   logging::rotate_log_file(log_file_name);
@@ -172,8 +176,8 @@ bool RunTerminationHelper(HANDLE console_token, DWORD pid) {
   return exit_code == 0;
 }
 
-VOID WINAPI ServiceMain(DWORD dwArgc, LPTSTR *lpszArgv) {
-  service_status_handle = RegisterServiceCtrlHandlerEx(SERVICE_NAME, HandlerEx, nullptr);
+VOID WINAPI ServiceMain(DWORD dwArgc, LPWSTR *lpszArgv) {
+  service_status_handle = RegisterServiceCtrlHandlerExW(service_options.name.c_str(), HandlerEx, nullptr);
   if (service_status_handle == nullptr) {
     // Nothing we can really do here but terminate ourselves
     ExitProcess(GetLastError());
@@ -270,7 +274,9 @@ VOID WINAPI ServiceMain(DWORD dwArgc, LPTSTR *lpszArgv) {
     UpdateProcThreadAttribute(startup_info.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, &job_handle, sizeof(job_handle), nullptr, nullptr);
 
     PROCESS_INFORMATION process_info;
-    if (!CreateProcessAsUserW(console_token, L"Sunshine.exe", nullptr, nullptr, nullptr, TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, (LPSTARTUPINFOW) &startup_info, &process_info)) {
+    const auto executable = std::filesystem::current_path() / L"Sunshine.exe";
+    auto command = sunshine_service::host_command(executable, service_options);
+    if (!CreateProcessAsUserW(console_token, executable.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, (LPSTARTUPINFOW) &startup_info, &process_info)) {
       CloseHandle(console_token);
       CloseHandle(job_handle);
       continue;
@@ -343,15 +349,27 @@ int DoGracefulTermination(DWORD pid) {
 }
 
 int main(int argc, char *argv[]) {
-  static const SERVICE_TABLE_ENTRY service_table[] = {
-    {(LPSTR) SERVICE_NAME, ServiceMain},
-    {nullptr, nullptr}
-  };
-
   // Check if this is a reinvocation of ourselves to send Ctrl-C to Sunshine.exe
   if (argc == 3 && strcmp(argv[1], "--terminate") == 0) {
     return DoGracefulTermination(atol(argv[2]));
   }
+
+  int wide_count = 0;
+  auto wide_arguments = CommandLineToArgvW(GetCommandLineW(), &wide_count);
+  if (!wide_arguments) {
+    return ERROR_INVALID_PARAMETER;
+  }
+  const std::vector<std::wstring> arguments(wide_arguments + 1, wide_arguments + wide_count);
+  LocalFree(wide_arguments);
+  const auto options = sunshine_service::parse_options(arguments);
+  if (!options) {
+    return ERROR_INVALID_PARAMETER;
+  }
+  service_options = *options;
+  const SERVICE_TABLE_ENTRYW service_table[] = {
+    {service_options.name.data(), ServiceMain},
+    {nullptr, nullptr}
+  };
 
   // By default, services have their current directory set to %SYSTEMROOT%\System32.
   // We want to use the directory where Sunshine.exe is located instead of system32.
@@ -367,5 +385,5 @@ int main(int argc, char *argv[]) {
   SetCurrentDirectoryW(module_path);
 
   // Trigger our ServiceMain()
-  return StartServiceCtrlDispatcher(service_table);
+  return StartServiceCtrlDispatcherW(service_table);
 }

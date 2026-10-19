@@ -931,6 +931,10 @@ namespace display_device {
     SingleDisplayConfiguration config;
     config.m_device_id = video_config.output_name;
     config.m_device_prep = *device_prep;
+    if (video_config.viewport_crop.enabled && video_config.viewport_crop.monitor_switch && config.m_device_prep == SingleDisplayConfiguration::DevicePreparation::EnsureOnlyDisplay) {
+      // Keep other active displays available for the explicitly enabled monitor traversal.
+      config.m_device_prep = SingleDisplayConfiguration::DevicePreparation::EnsureActive;
+    }
 
     const auto hdr_state {parse_hdr_option(video_config, session)};
 #ifdef __APPLE__
@@ -947,7 +951,7 @@ namespace display_device {
     }
 #endif
 
-    if (!parse_resolution_option(video_config, session, config)) {
+    if (!video_config.viewport_crop.enabled && !parse_resolution_option(video_config, session, config)) {
       // Error already logged
       return failed_to_parse_tag_t {};
     }
@@ -962,6 +966,9 @@ namespace display_device {
       return failed_to_parse_tag_t {};
     }
 
+    if (video_config.viewport_crop.enabled) {
+      config.m_resolution.reset();
+    }
     return config;
   }
 }  // namespace display_device

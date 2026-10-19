@@ -16,6 +16,7 @@ namespace platf {
 }
 
 namespace video {
+  struct bitrate_reconfigure_result_t;
   struct config_t;
   struct sunshine_colorspace_t;
 }  // namespace video
@@ -70,6 +71,21 @@ namespace nvenc {
      * @return `true` on success, `false` on error.
      */
     virtual bool invalidate_ref_frames(std::uint64_t first_frame, std::uint64_t last_frame) = 0;
+
+    /**
+     * @brief Reconfigure bitrate on the active encoder session.
+     *
+     * @param target_kbps Requested bitrate in kilobits per second.
+     * @return Detailed result of the runtime bitrate update.
+     */
+    virtual video::bitrate_reconfigure_result_t reconfigure_bitrate(std::uint32_t target_kbps) = 0;
+    /**
+     * @brief Reconfigure bitrate and encoder rate without replacing the session.
+     * @param target_kbps New codec bitrate.
+     * @param fps New encoder rate, or zero to preserve it.
+     * @return Backend result.
+     */
+    virtual video::bitrate_reconfigure_result_t reconfigure_stream(std::uint32_t target_kbps, std::uint32_t fps);
   };
 
 }  // namespace nvenc

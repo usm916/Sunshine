@@ -28,6 +28,18 @@ const loopSeconds = computed({
             v-model="config.cursor_focus_auto"
             default="false"
   />
+  <Checkbox class="mb-3"
+            id="cursor_focus_follow_text"
+            locale-prefix="config"
+            v-model="config.cursor_focus_follow_text"
+            default="true"
+  />
+  <div class="mb-3">
+    <label for="cursor_focus_mouse_move_threshold" class="form-label">{{ $t('config.cursor_focus_mouse_move_threshold') }}</label>
+    <input id="cursor_focus_mouse_move_threshold" type="number" min="1" max="100" class="form-control"
+           v-model.number="config.cursor_focus_mouse_move_threshold" :disabled="config.cursor_focus_follow_text !== 'enabled'" />
+    <div class="form-text">{{ $t('config.cursor_focus_mouse_move_threshold_desc') }}</div>
+  </div>
   <div class="mb-3">
     <label for="cursor_focus_shape" class="form-label">{{ $t('config.cursor_focus_shape') }}</label>
     <select id="cursor_focus_shape" class="form-select" v-model="config.cursor_focus_shape"

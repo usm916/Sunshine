@@ -23,6 +23,8 @@ function mountAudioVideo(platform) {
         DisplayDeviceOptions: true,
         DisplayModesSettings: true,
         CursorFocus: true,
+        ViewportCrop: true,
+        LowBandwidth: true,
       },
     },
   })

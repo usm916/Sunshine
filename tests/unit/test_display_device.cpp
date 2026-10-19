@@ -519,3 +519,38 @@ namespace {
     }
   }
 }  // namespace
+
+TEST(ViewportCropDisplayTest, PreservesHostResolutionEvenWithAutomaticAndRemappedModes) {
+  config::video_t video_config {};
+  video_config.viewport_crop.enabled = true;
+  video_config.dd.configuration_option = config_option_e::verify_only;
+  video_config.dd.resolution_option = resolution_option_e::automatic;
+  video_config.dd.refresh_rate_option = refresh_rate_option_e::disabled;
+  rtsp_stream::launch_session_t session {};
+  video_config.dd.mode_remapping.resolution_only.push_back({"", "", "1280x720", ""});
+  session.enable_sops = true;
+  session.width = 1920;
+  session.height = 1080;
+  const auto result = display_device::parse_configuration(video_config, session);
+  const auto *parsed = std::get_if<display_device::SingleDisplayConfiguration>(&result);
+  ASSERT_NE(parsed, nullptr);
+  EXPECT_FALSE(parsed->m_resolution.has_value());
+}
+
+TEST(ViewportCropDisplayTest, MonitorTraversalKeepsOtherDisplaysAvailableOnlyWhenEnabled) {
+  config::video_t video_config {};
+  video_config.dd.configuration_option = config_option_e::ensure_only_display;
+  video_config.dd.resolution_option = resolution_option_e::disabled;
+  video_config.dd.refresh_rate_option = refresh_rate_option_e::disabled;
+  rtsp_stream::launch_session_t session {};
+  for (const bool crop : {false, true}) {
+    for (const bool follow : {false, true}) {
+      video_config.viewport_crop.enabled = crop;
+      video_config.viewport_crop.monitor_switch = follow;
+      const auto result = display_device::parse_configuration(video_config, session);
+      const auto *parsed = std::get_if<display_device::SingleDisplayConfiguration>(&result);
+      ASSERT_NE(parsed, nullptr);
+      EXPECT_EQ(parsed->m_device_prep, crop && follow ? device_prep_t::EnsureActive : device_prep_t::EnsureOnlyDisplay);
+    }
+  }
+}

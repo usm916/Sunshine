@@ -6,6 +6,23 @@ import AudioVideo from '../../src_assets/common/assets/web/configs/tabs/AudioVid
 import configTabs from '../../src_assets/common/assets/web/configs/config_tabs.json'
 
 describe('cursor detail preservation', () => {
+  it('switches text-following and preserves the movement threshold', async () => {
+    const config = structuredClone(configTabs.find(tab => tab.id === 'av').options)
+    const wrapper = mount(CursorFocus, { props: { config }, global: { mocks: { $t: key => key } } })
+    expect(config.cursor_focus_follow_text).toBe('enabled')
+    expect(config.cursor_focus_mouse_move_threshold).toBe(6)
+    expect(wrapper.get('#cursor_focus_mouse_move_threshold').element.disabled).toBe(false)
+    await wrapper.get('#cursor_focus_mouse_move_threshold').setValue(12)
+    expect(config.cursor_focus_mouse_move_threshold).toBe(12)
+    await wrapper.get('#cursor_focus_follow_text').setValue(false)
+    expect(config.cursor_focus_follow_text).toBe('disabled')
+    expect(wrapper.get('#cursor_focus_mouse_move_threshold').element.disabled).toBe(true)
+    await wrapper.get('#cursor_focus_follow_text').setValue(true)
+    expect(config.cursor_focus_follow_text).toBe('enabled')
+    expect(config.cursor_focus_mouse_move_threshold).toBe(12)
+    wrapper.unmount()
+  })
+
   it('keeps the feature disabled by default and saves enabled settings', async () => {
     const config = structuredClone(configTabs.find(tab => tab.id === 'av').options)
     const wrapper = mount(CursorFocus, { props: { config }, global: { mocks: { $t: key => key } } })

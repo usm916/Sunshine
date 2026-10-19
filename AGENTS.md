@@ -3,6 +3,10 @@
 On Windows we use msys2 and ucrt64 to compile.
 Prefix Windows build and test commands with `C:\msys64\msys2_shell.cmd -defterm -here -no-start -ucrt64 -c`.
 
+On macOS use native Apple Clang, CMake/Ninja, and the Qt SDK; the MSYS2 prefix above applies only to Windows.
+Read `docs/custom/mac-development.md` before platform work. Configure macOS tests with
+`-DSUNSHINE_LLVM_COVERAGE=ON`. macOS compilation and runtime are not yet verified for this custom snapshot.
+
 Prefix build directories with `cmake-build-`.
 
 The test executable is named `test_sunshine` and will be located inside the `tests` directory within

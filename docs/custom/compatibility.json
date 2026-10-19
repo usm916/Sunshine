@@ -3,7 +3,7 @@
   "phase": "implementation",
   "host_upstream_base": "bd0cdfd2eb7d638dfa6014ba4e90bfc88fc52371",
   "client_repository": "https://github.com/usm916/moonlight-qt.git",
-  "client_commit": "ce35564ef2a35cba36bd39a96ebd2b61dc003a66",
+  "client_commit": "f4337f86b91ddac9d6fd2a83d5d47bfae74751d7",
   "common_repository": "https://github.com/usm916/moonlight-common-c.git",
   "common_commit": "ae67fe009386d536569fecc34ba156d581309b54",
   "common_code_base": "f900dd4767759c7b9d0e93bcea666b55c69ea62f",
@@ -25,5 +25,17 @@
     "node": "24.19.0",
     "compiler": "GCC 16.2.0 UCRT64",
     "ffmpeg_tag": "v2026.1004.34232"
-  }
+  },
+  "client_branch": "custom/main",
+  "development_guide": "docs/custom/mac-development.md",
+  "last_reviewed": "2026-10-19",
+  "native_tests_passed": 426,
+  "web_tests_passed": 72,
+  "macos_build_status": "not_run",
+  "macos_end_to_end_status": "not_run",
+  "windows_host_runtime_sha256": "e256765a81f36540ab406a427df36d874a5cfa4b2e51a658f3fbdeb04ce6efc4",
+  "windows_recovery_loopback_status": "passed_same_connection_coarse_enabled_then_disabled",
+  "actual_wan_recovery_v2_status": "not_run",
+  "low_bandwidth_input_loss_root_cause": "unconfirmed",
+  "clipboard_tests_note": "The original clipboard_tests entries are historical. This snapshot reruns 426 selected native tests and 72 Web tests; Mac clipboard and cross-device clipboard round trips remain unverified."
 }

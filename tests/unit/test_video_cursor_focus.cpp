@@ -4,6 +4,8 @@
  */
 #include "../tests_common.h"
 
+#include <src/video_cursor_focus_diagnostics.h>
+
 // standard includes
 #include <limits>
 #include <tuple>
@@ -196,9 +198,9 @@ TEST(CursorFocusBackgroundTest, FrozenAndContinuousModesHaveDistinctBehavior) {
   EXPECT_FALSE(scheduler.advance(120, 100, -1, 2000000000).full);
   EXPECT_TRUE(scheduler.advance(120, 100, 0, 2000000000).full);
   EXPECT_TRUE(scheduler.advance(120, 100, 0, 2100000000).full);
-  EXPECT_TRUE(scheduler.advance(120, 100, -999, 2200000000).full);
+  EXPECT_FALSE(scheduler.advance(120, 100, -999, 2200000000).full);
   EXPECT_EQ(scheduler.advance(120, 100, -999, 2300000000).count, 0);
-  EXPECT_TRUE(scheduler.advance(120, 100, 999999, 2400000000).full);
+  EXPECT_FALSE(scheduler.advance(120, 100, 999999, 2400000000).full);
   EXPECT_EQ(scheduler.advance(120, 100, 999999, 3400000000).count, 0);
 }
 
@@ -260,13 +262,13 @@ TEST(CursorFocusBackgroundTest, BoundsRejectInvalidOutputMappingAndClipExtremeCe
 TEST(CursorFocusAutomaticTest, SelectsEveryBitrateBoundaryAndPreservesGeometryAndSavedSettings) {
   settings_t saved {true, 96, 8, "rectangle", 640, 240, -1, true};
   for (const auto &[bitrate, scale, ms, frames, enabled] : std::vector<std::tuple<int, int, int, int, bool>> {
-         {1, 16, 5000, 0, true},
-         {250, 16, 5000, 0, true},
-         {251, 12, 3000, 0, true},
-         {500, 12, 3000, 0, true},
-         {999, 12, 3000, 0, true},
-         {1000, 4, 1000, 0, true},
-         {1999, 4, 1000, 0, true},
+         {1, 6, 5000, 0, true},
+         {250, 6, 5000, 0, true},
+         {251, 4, 3000, 0, true},
+         {500, 4, 3000, 0, true},
+         {999, 4, 3000, 0, true},
+         {1000, 3, 1000, 0, true},
+         {1999, 3, 1000, 0, true},
          {2000, 2, 0, 5, true},
          {2999, 2, 0, 5, true},
          {3000, 8, -1, 0, false},
@@ -312,9 +314,9 @@ TEST(CursorFocusBackgroundTest, FiveFrameSweepIsExactIndependentOfFpsAndClock) {
       EXPECT_EQ(work.regions[5].right, 120);
     }
     EXPECT_EQ(scheduler.advance(120, 100, 0, 6 * frame_ns, 5).regions[0], (pixel_rect_t {0, 0, 20, 20}));
-    EXPECT_TRUE(scheduler.advance(120, 100, 0, 0, 10).full);
+    EXPECT_FALSE(scheduler.advance(120, 100, 0, 0, 10).full);
     EXPECT_EQ(scheduler.advance(120, 100, 0, 0, 10).count, 3);
-    EXPECT_TRUE(scheduler.advance(120, 100, -1, 0, 0).full);
+    EXPECT_FALSE(scheduler.advance(120, 100, -1, 0, 0).full);
     EXPECT_EQ(scheduler.advance(120, 100, -1, 1, 0).count, 0);
   }
 }
@@ -328,4 +330,38 @@ TEST(CursorFocusBackgroundTest, FrameSweepFractionalWorkAndBoundedCatchup) {
   EXPECT_EQ(scheduler.advance(1, 1, 0, 5, 5).count, 1);
   scheduler.advance(120, 100, 0, 0, 1);
   EXPECT_EQ(scheduler.advance(120, 100, 0, 1, 1).count, 8);
+}
+
+TEST(CursorFocusBackgroundTest, AdaptivePeriodChangesRetainCacheAndAvoidFullRefreshBurst) {
+  background_scheduler_t scheduler;
+  ASSERT_TRUE(scheduler.advance(120, 100, 1000, 0).full);
+  const auto changed = scheduler.advance(120, 100, 5000, 100000000);
+  EXPECT_FALSE(changed.full);
+  EXPECT_EQ(changed.count, 0);
+  EXPECT_FALSE(scheduler.advance(120, 100, -1, 200000000).full);
+  const auto frames = scheduler.advance(120, 100, 0, 300000000, 5);
+  EXPECT_FALSE(frames.full);
+  EXPECT_EQ(frames.count, 6);
+}
+
+TEST(CursorFocusDiagnostics, DistinguishesRequestedAndEffectiveProcessing) {
+  using namespace video::cursor_focus;
+  auto (*volatile classify)(bool, bool, bool) = &render_state;
+  EXPECT_EQ(classify(false, true, true), render_state_e::disabled);
+  EXPECT_EQ(classify(true, false, false), render_state_e::missing_buffer);
+  EXPECT_EQ(classify(true, true, false), render_state_e::unmapped_anchor);
+  EXPECT_EQ(classify(true, true, true), render_state_e::applied);
+}
+
+TEST(CursorFocusDiagnostics, CoalescesDesktopTransitionsAndSuppressesUnchangedFrames) {
+  using namespace video::cursor_focus;
+  using namespace std::chrono_literals;
+  const std::chrono::steady_clock::time_point start {};
+  render_gate_t gate;
+  EXPECT_TRUE(gate.should_log(render_state_e::applied, start));
+  EXPECT_FALSE(gate.should_log(render_state_e::disabled, start - 1s));
+  EXPECT_FALSE(gate.should_log(render_state_e::unmapped_anchor, start + 1s));
+  EXPECT_TRUE(gate.should_log(render_state_e::unmapped_anchor, start + 2s));
+  EXPECT_FALSE(gate.should_log(render_state_e::unmapped_anchor, start + 10s));
+  EXPECT_TRUE(gate.should_log(render_state_e::disabled, start + 11s));
 }

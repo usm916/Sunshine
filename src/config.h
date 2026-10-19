@@ -16,6 +16,8 @@
 // local includes
 #include "nvenc/nvenc_config.h"
 #include "video_cursor_focus.h"
+#include "video_low_bandwidth.h"
+#include "video_viewport.h"
 
 namespace config {
   namespace nv {
@@ -221,8 +223,11 @@ namespace config {
       workarounds_t wa;  ///< Display-device compatibility workarounds.
     } dd;  ///< Display-device integration settings.
 
+    ::video::low_bandwidth::settings_t low_bandwidth;  ///< Fixed or adaptive low-rate session policy.
+    bool adaptive_bitrate;  ///< Allow runtime NVENC bitrate adaptation from client telemetry.
     int max_bitrate;  ///< Maximum bitrate ceiling in kbps for bitrate requested from the client.
     double minimum_fps_target;  ///< Lowest framerate that will be used when streaming. Range 0-1000, 0 = half of client's requested framerate.
+    ::video::viewport::settings_t viewport_crop {};  ///< Native-pixel crop and tracking policy.
     ::video::cursor_focus::settings_t cursor_focus;  ///< Optional cursor-following detail preservation for Windows D3D11 conversion.
   };
 

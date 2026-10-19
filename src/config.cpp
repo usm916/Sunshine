@@ -796,8 +796,11 @@ namespace config {
       {}  // wa
     },  // display_device
 
+    {"adaptive"},  // low_bandwidth (adaptive by default)
+    false,  // adaptive_bitrate
     0,  // max_bitrate
     0,  // minimum_fps_target (0 = framerate)
+    {},  // viewport_crop (disabled)
     {}  // cursor_focus (disabled)
   };
 
@@ -1736,10 +1739,27 @@ namespace config {
       video.dd.wa.hdr_toggle_delay = std::chrono::milliseconds {value};
     }
 
+    string_restricted_f(vars, "low_bandwidth_mode", video.low_bandwidth.mode, {"disabled"sv, "fixed"sv, "adaptive"sv});
+    auto low_bandwidth_target = video.low_bandwidth.target_kbps;
+    int_between_f(vars, "low_bandwidth_target_kbps", low_bandwidth_target, {0, 1000000});
+    if (low_bandwidth_target == 0 || low_bandwidth_target >= 32) {
+      video.low_bandwidth.target_kbps = low_bandwidth_target;
+    }
+    int_between_f(vars, "low_bandwidth_minimum_kbps", video.low_bandwidth.minimum_kbps, {32, 1000000});
+    int_between_f(vars, "low_bandwidth_maximum_fps", video.low_bandwidth.maximum_fps, {1, 120});
+    int_between_f(vars, "low_bandwidth_minimum_fps", video.low_bandwidth.minimum_fps, {1, 120});
+    bool_f(vars, "adaptive_bitrate", video.adaptive_bitrate);
     int_f(vars, "max_bitrate", video.max_bitrate);
     double_between_f(vars, "minimum_fps_target", video.minimum_fps_target, {0.0, 1000.0});
+    bool_f(vars, "viewport_crop", video.viewport_crop.enabled);
+    int_between_f(vars, "viewport_crop_deadzone_width", video.viewport_crop.deadzone_width, {0, 16384});
+    int_between_f(vars, "viewport_crop_deadzone_height", video.viewport_crop.deadzone_height, {0, 16384});
+    bool_f(vars, "viewport_crop_monitor_switch", video.viewport_crop.monitor_switch);
+    int_between_f(vars, "viewport_crop_monitor_switch_delay", video.viewport_crop.monitor_switch_delay, {100, 5000});
     bool_f(vars, "cursor_focus", video.cursor_focus.enabled);
     bool_f(vars, "cursor_focus_auto", video.cursor_focus.automatic);
+    bool_f(vars, "cursor_focus_follow_text", video.cursor_focus.follow_text);
+    int_between_f(vars, "cursor_focus_mouse_move_threshold", video.cursor_focus.mouse_move_threshold, {1, 100});
     int_between_f(vars, "cursor_focus_radius", video.cursor_focus.radius, {32, 1024});
     int_between_f(vars, "cursor_focus_background_scale", video.cursor_focus.background_scale, {2, 16});
     string_restricted_f(vars, "cursor_focus_shape", video.cursor_focus.shape, {"circle"sv, "rectangle"sv});
