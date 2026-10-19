@@ -12,12 +12,16 @@ Moonlight Qt checkout used as a fixture source.
 #>
 [CmdletBinding()]
 param(
-    [string]$HostRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
+    [string]$HostRoot,
     [string]$ClientRoot
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Resolve script-relative defaults after parameter binding has initialized $PSScriptRoot.
+if ([string]::IsNullOrWhiteSpace($HostRoot)) {
+    $HostRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+}
 $HostRoot = (Resolve-Path -LiteralPath $HostRoot).Path
 if ([string]::IsNullOrWhiteSpace($ClientRoot)) {
     $ClientRoot = Join-Path (Split-Path -Parent $HostRoot) 'moonlightCustom'
@@ -32,10 +36,21 @@ $fixtureHost = Join-Path $fixtureRoot 'host'
 $fixtureClient = Join-Path $fixtureRoot 'client'
 $passed = 0
 
+<#
+@brief Run fixture Git commands using exit status, allowing informational stderr on Windows PowerShell.
+@param GitArguments Arguments passed literally to Git.
+#>
 function Invoke-FixtureGit {
     param([string[]]$GitArguments)
-    $null = & git @GitArguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & git @GitArguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    if ($exitCode -ne 0) {
         throw "Fixture Git command failed: $($GitArguments -join ' ')"
     }
 }
@@ -71,6 +86,20 @@ try {
 
     $null = & $checker -HostRoot $fixtureHost -ClientRoot $fixtureClient
     Write-Output 'PASS: matching pair'
+    $passed++
+
+    $null = & $checker -ClientRoot $fixtureClient
+    Write-Output 'PASS: default host root after parameter binding'
+    $passed++
+
+    $rejected = $false
+    try {
+        Invoke-FixtureGit @('-C', $fixtureHost, 'rev-parse', '--verify', 'refs/heads/fixture-missing-ref')
+    } catch {
+        $rejected = $_.Exception.Message.StartsWith('Fixture Git command failed:')
+    }
+    if (-not $rejected) { throw 'The fixture runner ignored a nonzero Git exit code.' }
+    Write-Output 'PASS: native Git failure is rejected'
     $passed++
 
     Invoke-FixtureGit @('-C', $fixtureClientCommon, 'checkout', '--quiet', '--detach', $record.common_code_base)

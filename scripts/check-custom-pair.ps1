@@ -12,12 +12,16 @@ Moonlight Qt checkout. Defaults to the sibling moonlightCustom directory.
 #>
 [CmdletBinding()]
 param(
-    [string]$HostRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$HostRoot,
     [string]$ClientRoot
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Resolve script-relative defaults after parameter binding has initialized $PSScriptRoot.
+if ([string]::IsNullOrWhiteSpace($HostRoot)) {
+    $HostRoot = (Split-Path -Parent $PSScriptRoot)
+}
 
 function Invoke-PairGit {
     param([string]$Repository, [string[]]$GitArguments)

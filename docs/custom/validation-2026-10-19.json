@@ -62,5 +62,21 @@
   "macos_clipboard_round_trip": "not_run",
   "real_wan_recovery_v2": "not_run",
   "input_loss_root_cause": "unconfirmed",
-  "artifacts_note": "Full local logs and personal/runtime configuration are excluded from Git. Previous task validation records are summarized in the custom documentation."
+  "artifacts_note": "Full local logs and personal/runtime configuration are excluded from Git. Previous task validation records are summarized in the custom documentation.",
+  "pair_fixture_tests": {
+    "passed": 9,
+    "command": "powershell.exe -NoProfile -File tests/custom/test-pair-check.ps1",
+    "cases": [
+      "matching pair",
+      "script-relative default host root",
+      "native Git nonzero exit",
+      "shared checkout mismatch",
+      "record mismatch",
+      "wrong remote",
+      "dirty dependency",
+      "foundation source change",
+      "untracked foundation source"
+    ]
+  },
+  "documented_macos_pin_check": "passed on Windows using the native Git installation; macOS execution still required"
 }
